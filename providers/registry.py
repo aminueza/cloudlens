@@ -8,6 +8,12 @@ from providers.base import NetworkPeering, NetworkResource, ProviderInterface
 logger = logging.getLogger(__name__)
 
 
+class AuthenticationError(Exception):
+    """Raised when all providers fail authentication."""
+
+    pass
+
+
 class ProviderRegistry:
     def __init__(self, enabled: list[str]):
         self._providers: dict[str, ProviderInterface] = {}

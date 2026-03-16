@@ -1,4 +1,4 @@
-"""CloudLens FastAPI application with lifespan management."""
+"""CloudLens FastAPI application."""
 
 import logging
 import time
@@ -7,14 +7,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from api.auth import AuthMiddleware
 from api.errors import CloudLensError, cloudlens_error_handler, generic_error_handler
-from api.models import AuthStatusResponse
 from api.ratelimit import limiter
 from api.routes import (
     accounts,
@@ -26,53 +26,40 @@ from api.routes import (
     incidents,
     topology,
 )
+from config.logging import setup_logging
 from config.settings import PRODUCTS, settings
 from db.session import close_db, init_db
 from providers.fetcher import BackgroundFetcher
 from providers.registry import ProviderRegistry
 
 logger = logging.getLogger(__name__)
-templates = Jinja2Templates(directory="templates")
-
-
-def setup_logging() -> None:
-    """Configure structured logging."""
-    logging.basicConfig(
-        level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Application lifespan — startup and shutdown."""
     setup_logging()
-    logger.info("Starting CloudLens Network Intelligence Platform")
+    logger.info("Starting CloudLens")
 
-    # Initialize database
-    init_db(settings.DB_PATH)
+    await init_db(settings.DB_PATH)
+    logger.info("Database initialized")
 
-    # Initialize provider registry with enabled providers
-    registry = ProviderRegistry(enabled_providers=settings.ENABLED_PROVIDERS)
+    enabled = [p.strip() for p in settings.ENABLED_PROVIDERS.split(",") if p.strip()]
+    registry = ProviderRegistry(enabled)
 
-    # Create and start background fetcher
     fetcher = BackgroundFetcher(
         registry=registry,
-        poll_interval=settings.POLL_INTERVAL,
+        poll_interval=settings.CLOUDLENS_POLL_INTERVAL,
     )
     fetcher.start()
 
-    # Store on app state
     app.state.fetcher = fetcher
     app.state.registry = registry
 
-    logger.info("CloudLens started with providers: %s", settings.ENABLED_PROVIDERS)
+    logger.info("CloudLens started with providers: %s", enabled)
     yield
 
-    # Shutdown
-    logger.info("Shutting down CloudLens")
     fetcher.stop()
-    close_db()
+    await close_db()
     logger.info("CloudLens shutdown complete")
 
 
@@ -82,59 +69,30 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# --- Rate limiter ---
-app.state.limiter = limiter
-
-# --- Middleware ---
+# Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[
+        o.strip() for o in settings.CLOUDLENS_CORS_ORIGINS.split(",") if o.strip()
+    ],
     allow_methods=["GET", "POST", "PATCH"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 app.add_middleware(AuthMiddleware)
 
-
-@app.middleware("http")
-async def request_logging(request: Request, call_next):
-    """Log request method, path, and duration."""
-    start = time.perf_counter()
-    response = await call_next(request)
-    duration_ms = (time.perf_counter() - start) * 1000
-    logger.debug(
-        "%s %s -> %s (%.1fms)",
-        request.method,
-        request.url.path,
-        response.status_code,
-        duration_ms,
-    )
-    return response
-
-
-# --- Error handlers ---
+# Error handlers
 app.add_exception_handler(CloudLensError, cloudlens_error_handler)  # type: ignore[arg-type]
-app.add_exception_handler(Exception, generic_error_handler)  # type: ignore[arg-type]
+app.add_exception_handler(Exception, generic_error_handler)
 
+# Rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
-async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
-    return JSONResponse({"error": "Rate limit exceeded"}, status_code=429)
-
-
-app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore[arg-type]
-
-# --- Prometheus instrumentation ---
-try:
-    from prometheus_fastapi_instrumentator import Instrumentator
-
-    Instrumentator().instrument(app).expose(app)
-except ImportError:
-    logger.debug("prometheus-fastapi-instrumentator not installed, skipping metrics")
-
-# --- Static files ---
+# Static + templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
-# --- Route registration ---
+# Routes
 app.include_router(accounts.router)
 app.include_router(topology.router)
 app.include_router(export.router)
@@ -145,41 +103,50 @@ app.include_router(incidents.router)
 app.include_router(ai_routes.router)
 
 
-# --- Root endpoints ---
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    start = time.monotonic()
+    response = await call_next(request)
+    duration_ms = round((time.monotonic() - start) * 1000, 1)
+    logger.info(
+        "%s %s -> %s (%.1fms)",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+    )
+    return response
 
 
 @app.get("/health")
-async def health_check(request: Request) -> dict:
-    """Health check with per-provider status."""
-    registry = request.app.state.registry
-    providers_status = {}
-    for name, provider in registry.providers.items():
-        err = getattr(provider, "auth_error", None)
-        providers_status[name] = {"ok": err is None, "error": err}
-    return {"status": "ok", "providers": providers_status}
+async def health():
+    registry = getattr(app.state, "registry", None)
+    providers: dict[str, dict] = {}
+    if registry:
+        for name, provider in registry.get_all_providers().items():
+            err = provider.get_auth_error()
+            providers[name] = {"ok": err is None, "error": err}
+    has_errors = any(not p["ok"] for p in providers.values())
+    return {
+        "status": "degraded" if has_errors else "ok",
+        "providers": providers,
+    }
 
 
-@app.get("/api/auth/status", response_model=AuthStatusResponse)
-async def auth_status(request: Request) -> dict:
-    """Per-provider authentication state."""
-    registry = request.app.state.registry
-    providers_state = {}
-    for name, provider in registry.providers.items():
-        err = getattr(provider, "auth_error", None)
-        providers_state[name] = {
-            "authenticated": err is None,
-            "error": err,
-        }
-    return {"providers": providers_state}
+@app.get("/api/auth/status")
+async def auth_status():
+    registry = getattr(app.state, "registry", None)
+    providers: dict[str, dict] = {}
+    if registry:
+        for name, provider in registry.get_all_providers().items():
+            err = provider.get_auth_error()
+            providers[name] = {"ok": err is None, "error": err}
+    return {"providers": providers}
 
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    """Render the main dashboard."""
     return templates.TemplateResponse(
         "index.html",
-        {
-            "request": request,
-            "products": PRODUCTS,
-        },
+        {"request": request, "products": PRODUCTS},
     )
