@@ -331,6 +331,13 @@ class AWSProvider(ProviderInterface):
         seen: set[str] = set()
 
         async def _fetch_region(region: str) -> None:
+            # Build VPC ID → name mapping so peering source/target match network names
+            vpcs = await self._describe("ec2", region, "describe_vpcs", "Vpcs")
+            vpc_names: dict[str, str] = {}
+            for vpc in vpcs:
+                vtags = _aws_tags_to_dict(vpc.get("Tags"))
+                vpc_names[vpc["VpcId"]] = _get_tag(vtags, "Name", vpc["VpcId"])
+
             peers = await self._describe(
                 "ec2",
                 region,
@@ -347,13 +354,16 @@ class AWSProvider(ProviderInterface):
                 state = "connected" if status == "active" else status
                 req = p.get("RequesterVpcInfo", {})
                 acc = p.get("AccepterVpcInfo", {})
+                # Use VPC names (not prefixed IDs) — must match graph builder's net_{name} convention
+                src_vpc_id = req.get("VpcId", "")
+                dst_vpc_id = acc.get("VpcId", "")
                 results.append(
                     NetworkPeering(
                         id=f"aws_{pid}",
                         name=_get_tag(tags, "Name", pid),
                         provider="aws",
-                        source_network=f"aws_{req.get('VpcId', '')}",
-                        target_network=f"aws_{acc.get('VpcId', '')}",
+                        source_network=vpc_names.get(src_vpc_id, src_vpc_id),
+                        target_network=vpc_names.get(dst_vpc_id, dst_vpc_id),
                         state=state,
                         source_account=req.get("OwnerId", ""),
                         target_account=acc.get("OwnerId", ""),
