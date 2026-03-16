@@ -1,7 +1,7 @@
 """Incident management with auto-enrichment and AI analysis."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -43,7 +43,7 @@ async def create_incident(body: IncidentCreate, request: Request) -> dict[str, A
     """Create an incident with auto-enrichment."""
     scope = body.scope or "all"
     fetcher = request.app.state.fetcher
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     incident_id = str(uuid.uuid4())
 
     # Auto-enrichment: capture snapshot, health checks, recent changes
@@ -102,7 +102,7 @@ async def update_incident(
 
     updates = body.model_dump(exclude_none=True)
     incident.update(updates)
-    incident["updated_at"] = datetime.now(timezone.utc).isoformat()
+    incident["updated_at"] = datetime.now(UTC).isoformat()
     return incident
 
 
@@ -120,10 +120,10 @@ async def add_annotation(
     annotation = {
         "author": body.author,
         "content": body.content,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
     incident["annotations"].append(annotation)
-    incident["updated_at"] = datetime.now(timezone.utc).isoformat()
+    incident["updated_at"] = datetime.now(UTC).isoformat()
     return incident
 
 
@@ -142,7 +142,7 @@ async def analyze_incident_rca(incident_id: str, request: Request) -> dict[str, 
 
     analysis = await analyze_incident(incident, structured, changes, health)
     incident["analysis"] = analysis
-    incident["updated_at"] = datetime.now(timezone.utc).isoformat()
+    incident["updated_at"] = datetime.now(UTC).isoformat()
     return incident
 
 

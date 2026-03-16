@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import anthropic
@@ -130,7 +130,7 @@ def _rule_based_anomalies(
 ) -> list[dict[str, Any]]:
     """Rule-based anomaly detection."""
     anomalies: list[dict[str, Any]] = []
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     # Rapid removal: more than 5 removals in last 10 changes
     recent = historical_changes[:10] if historical_changes else []
@@ -432,7 +432,7 @@ async def detect_anomalies(
             end = ai_text.rfind("]") + 1
             if start >= 0 and end > start:
                 ai_anomalies = json.loads(ai_text[start:end])
-                now = datetime.now(timezone.utc).isoformat()
+                now = datetime.now(UTC).isoformat()
                 for a in ai_anomalies:
                     a.setdefault("detected_at", now)
                     a.setdefault("severity", "low")
