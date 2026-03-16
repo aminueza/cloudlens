@@ -24,4 +24,7 @@ RUN mkdir -p /app/data
 
 EXPOSE 8050
 
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD curl -f http://localhost:8050/health || exit 1
+
 CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8050"]

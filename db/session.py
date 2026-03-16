@@ -92,6 +92,15 @@ CREATE TABLE IF NOT EXISTS ai_conversations (
     content TEXT NOT NULL,
     timestamp TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_snapshots_scope ON snapshots(scope, id DESC);
+CREATE INDEX IF NOT EXISTS idx_changes_scope ON changes(scope, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_health_scope ON health_checks(scope, id DESC);
+CREATE INDEX IF NOT EXISTS idx_violations_scope ON compliance_violations(scope, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_incidents_scope ON incidents(scope, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_annotations_incident ON incident_annotations(incident_id);
+CREATE INDEX IF NOT EXISTS idx_ai_scope ON ai_conversations(scope, timestamp DESC);
 """
 
 DEFAULT_RULES: list[dict] = [

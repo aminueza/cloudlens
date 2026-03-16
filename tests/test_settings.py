@@ -6,17 +6,17 @@ def test_accounts_loaded():
 
 
 def test_products_derived():
-    assert "cnct" in PRODUCTS
-    assert "aiplatform" in PRODUCTS
+    assert "webapp" in PRODUCTS
+    assert "database" in PRODUCTS
 
 
 def test_account_names():
-    assert "cnct-dev" in ALL_ACCOUNT_NAMES
-    assert "cnct-prd" in ALL_ACCOUNT_NAMES
+    assert "webapp-dev" in ALL_ACCOUNT_NAMES
+    assert "webapp-prd" in ALL_ACCOUNT_NAMES
 
 
 def test_get_env():
-    assert get_env("cnct-dev") == "dev"
-    assert get_env("cnct-prd") == "prd"
-    assert get_env("connectivity-global") == "global"
+    assert get_env("webapp-dev") == "dev"
+    assert get_env("webapp-prd") == "prd"
+    assert get_env("monitoring-global") == "global"
     assert get_env("something") == "other"

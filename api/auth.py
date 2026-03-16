@@ -1,7 +1,4 @@
-"""Authentication middleware for CloudLens.
-
-Simple API-key / bearer-token auth. Multi-cloud — no provider-specific IdP.
-"""
+"""Authentication middleware for CloudLens."""
 
 import logging
 
@@ -14,49 +11,44 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+_PUBLIC_PREFIXES = tuple(
+    p.strip() for p in settings.CLOUDLENS_AUTH_PUBLIC_PATHS.split(",") if p.strip()
+)
+
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Lightweight auth gate.
-
-    * If ``settings.CLOUDLENS_AUTH_DISABLED`` is truthy the middleware is a
-      pass-through.
-    * Public paths (always includes ``/``) are exempt.
-    * Otherwise an ``X-API-Key`` header **or** ``Authorization: Bearer <token>``
-      must be present and non-empty.  For now any non-empty value is accepted
-      (placeholder for a real auth backend).
-    """
+    """API key auth. If CLOUDLENS_AUTH_DISABLED=true, passes through.
+    If CLOUDLENS_API_KEY is set, validates X-API-Key or Bearer token against it.
+    If CLOUDLENS_API_KEY is empty and auth is enabled, rejects all requests."""
 
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        # Auth disabled — pass through
         if settings.CLOUDLENS_AUTH_DISABLED:
             return await call_next(request)
 
-        path = request.url.path.rstrip("/") or "/"
-
-        # Always-public paths
-        public_paths: set[str] = {"/"}
-        for p in getattr(settings, "CLOUDLENS_AUTH_PUBLIC_PATHS", []):
-            public_paths.add(p.rstrip("/") or "/")
-
-        if path in public_paths:
+        path = request.url.path
+        if path == "/" or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
             return await call_next(request)
+
+        configured_key = settings.CLOUDLENS_API_KEY
+        if not configured_key:
+            # No key configured but auth enabled — reject
+            return JSONResponse(
+                {"error": "CLOUDLENS_API_KEY not configured"}, status_code=500
+            )
 
         # Check X-API-Key header
         api_key = request.headers.get("X-API-Key", "").strip()
-        if api_key:
+        if api_key and api_key == configured_key:
             return await call_next(request)
 
         # Check Authorization: Bearer <token>
         auth_header = request.headers.get("Authorization", "").strip()
         if auth_header.lower().startswith("bearer "):
             token = auth_header[7:].strip()
-            if token:
+            if token and token == configured_key:
                 return await call_next(request)
 
         logger.warning("Unauthenticated request to %s %s", request.method, path)
-        return JSONResponse(
-            {"error": "Authentication required"},
-            status_code=401,
-        )
+        return JSONResponse({"error": "Invalid or missing API key"}, status_code=401)

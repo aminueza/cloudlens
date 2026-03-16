@@ -15,6 +15,7 @@ class Settings(BaseSettings):
         "/health,/metrics,/static,/docs,/openapi.json,/api/events,/api/auth/status"
     )
     CLOUDLENS_CORS_ORIGINS: str = "*"
+    CLOUDLENS_API_KEY: str = ""
     ENABLED_PROVIDERS: str = "azure"
     ACCOUNTS_FILE: str = "config/accounts.yaml"
     ANTHROPIC_API_KEY: str = ""

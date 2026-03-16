@@ -178,8 +178,8 @@ providers:
 
   azure:
     subscriptions:
-      cnct-dev: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-      cnct-prd: "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy"
+      webapp-dev: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+      webapp-prd: "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy"
 
   gcp:
     projects:
