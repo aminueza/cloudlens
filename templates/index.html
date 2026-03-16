@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CloudLens</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+
+<header>
+  <b>CloudLens</b>
+  <div class="h-sep"></div>
+  <select id="psel" onchange="loadScope(this.value)">
+    {% for p in products %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+    <option value="all" selected>All</option>
+  </select>
+  <div class="stats" id="stats"></div>
+  <div id="health-badge" class="health-badge" title="Health score"></div>
+</header>
+
+<div id="toolbar">
+  <input type="text" id="search" placeholder="Search..." oninput="applySearch()">
+  <div class="sep"></div>
+  <button class="btn ebtn on" data-e="all" onclick="setEnv('all',this)">All</button>
+  <button class="btn ebtn" data-e="prd" onclick="setEnv('prd',this)">PRD</button>
+  <button class="btn ebtn" data-e="stg" onclick="setEnv('stg',this)">STG</button>
+  <button class="btn ebtn" data-e="dev" onclick="setEnv('dev',this)">DEV</button>
+  <div class="sep"></div>
+  <button class="btn" onclick="resetView()">Reset</button>
+  <button class="btn" onclick="exportSvg()">SVG</button>
+  <button class="btn" id="theme-btn" onclick="toggleTheme()">Light</button>
+  <span style="flex:1"></span>
+  <button class="btn ai-btn" onclick="toggleAI()">AI Assistant</button>
+  <button class="btn" onclick="refresh()" style="color:var(--azure)">Refresh</button>
+</div>
+
+<div id="main">
+  <div id="graph-wrap">
+    <div class="tooltip" id="tooltip"></div>
+    <div id="loading"><div class="spin"></div><div id="load-msg">Loading...</div></div>
+  </div>
+
+  <div id="sidebar">
+    <div class="sidebar-tabs">
+      <button class="stab active" data-panel="legend-panel" onclick="showSidePanel('legend-panel',this)">Legend</button>
+      <button class="stab" data-panel="health-panel" onclick="showSidePanel('health-panel',this)">Health</button>
+      <button class="stab" data-panel="changes-panel" onclick="showSidePanel('changes-panel',this)">Changes</button>
+      <button class="stab" data-panel="incident-panel" onclick="showSidePanel('incident-panel',this)">Incidents</button>
+    </div>
+
+    <div id="legend-panel" class="side-panel active">
+      <div class="ss"><h4>Legend</h4><div id="legend"></div></div>
+      <div class="ss"><h4>Providers</h4>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div class="li"><div class="dot" style="background:#FF9900"></div>AWS</div>
+          <div class="li"><div class="dot" style="background:#0078D4"></div>Azure</div>
+          <div class="li"><div class="dot" style="background:#4285F4"></div>GCP</div>
+        </div>
+      </div>
+      <div id="details"><p class="dtip">Click any node to inspect.</p></div>
+    </div>
+
+    <div id="health-panel" class="side-panel">
+      <div class="ss"><h4>Health Score</h4><div id="health-score-display" class="score-card"><div class="score-value">--</div></div></div>
+      <div class="ss"><h4>Issues</h4><div id="health-issues"></div></div>
+    </div>
+
+    <div id="changes-panel" class="side-panel">
+      <div class="ss"><h4>Recent Changes</h4><div id="change-list"></div></div>
+    </div>
+
+    <div id="incident-panel" class="side-panel">
+      <div class="ss"><h4>Incidents</h4><div id="incident-list"></div></div>
+      <div class="ss"><button class="btn btn-full incident-btn" onclick="showIncidentForm()">Start Incident</button></div>
+      <div id="incident-form" class="ss" style="display:none">
+        <h4>New Incident</h4>
+        <div class="form-group"><label class="form-label">Title</label><input type="text" id="inc-title" class="form-input" placeholder="What's happening?"></div>
+        <div class="form-group"><label class="form-label">Severity</label>
+          <div class="severity-picker">
+            <button class="sev-btn" data-sev="low" onclick="pickSev('low',this)">Low</button>
+            <button class="sev-btn sev-active" data-sev="high" onclick="pickSev('high',this)">High</button>
+            <button class="sev-btn" data-sev="critical" onclick="pickSev('critical',this)">Critical</button>
+          </div>
+        </div>
+        <div class="form-group"><label class="form-label">Description</label><textarea id="inc-desc" class="form-input form-textarea" rows="2"></textarea></div>
+        <div style="display:flex;gap:6px"><button class="btn btn-full incident-btn" onclick="submitIncident()">Create</button><button class="btn btn-full" onclick="hideIncidentForm()">Cancel</button></div>
+      </div>
+      <div id="incident-detail"></div>
+    </div>
+
+    <div id="last-ref"></div>
+  </div>
+
+  <div id="ai-panel" class="ai-panel off">
+    <div class="ai-header"><span>AI Network Assistant</span><button class="btn btn-sm" onclick="toggleAI()">Close</button></div>
+    <div id="ai-messages" class="ai-messages"></div>
+    <div class="ai-input-wrap">
+      <input type="text" id="ai-input" placeholder="Ask about your network..." onkeydown="if(event.key==='Enter')sendAI()">
+      <button class="btn ai-send" onclick="sendAI()">Send</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/graph.js"></script>
+</body>
+</html>
