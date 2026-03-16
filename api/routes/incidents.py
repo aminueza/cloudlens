@@ -49,7 +49,7 @@ async def create_incident(body: IncidentCreate, request: Request) -> dict[str, A
     # Auto-enrichment: capture snapshot, health checks, recent changes
     structured = fetcher.get_structured(scope) or {"providers": {}}
     topology_snapshot = fetcher.get_topology(scope)
-    health = run_health_checks(structured, scope)
+    health = run_health_checks(scope, structured)
     changes = await repo.get_changes(scope)
 
     # AI analysis
@@ -138,7 +138,7 @@ async def analyze_incident_rca(incident_id: str, request: Request) -> dict[str, 
     fetcher = request.app.state.fetcher
     structured = fetcher.get_structured(scope) or {"providers": {}}
     changes = incident.get("changes") or await repo.get_changes(scope)
-    health = incident.get("health_checks") or run_health_checks(structured, scope)
+    health = incident.get("health_checks") or run_health_checks(scope, structured)
 
     analysis = await analyze_incident(incident, structured, changes, health)
     incident["analysis"] = analysis

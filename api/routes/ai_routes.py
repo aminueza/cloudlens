@@ -5,26 +5,28 @@ from typing import Any
 from fastapi import APIRouter, Request
 
 from ai.analyzer import analyze_changes, query_topology
-from api.models import AIQueryRequest, AIResponse
+from api.models import AIQueryRequest
 from db import repository as repo
 
 router = APIRouter(tags=["ai"])
 
-# In-memory conversation history (replace with DB in production)
-_conversation_history: list[dict[str, str]] = []
 
-
-@router.post("/api/ai/query", response_model=AIResponse)
+@router.post("/api/ai/query")
 async def ai_query(body: AIQueryRequest, request: Request) -> dict[str, Any]:
     """Answer a natural-language question about the topology."""
     fetcher = request.app.state.fetcher
     scope = body.scope or "all"
-    structured = fetcher.get_structured(scope) or {"providers": {}}
+    structured = fetcher.get_structured(scope) or {}
+
     changes = await repo.get_changes(scope)
 
     from engine.health import run_health_checks
 
-    health = run_health_checks(structured, scope)
+    health = run_health_checks(scope, structured)
+
+    history = await repo.get_ai_history(scope, limit=20)
+
+    await repo.save_ai_message(scope, "user", body.question)
 
     answer = await query_topology(
         question=body.question,
@@ -32,29 +34,30 @@ async def ai_query(body: AIQueryRequest, request: Request) -> dict[str, Any]:
         scope=scope,
         health_checks=health,
         changes=changes,
-        conversation_history=_conversation_history[-20:],
+        conversation_history=history,
     )
 
-    # Store in conversation history
-    _conversation_history.append({"role": "user", "content": body.question})
-    _conversation_history.append({"role": "assistant", "content": answer})
+    await repo.save_ai_message(scope, "assistant", answer)
 
-    return {"response": answer, "scope": scope}
+    return {"answer": answer, "scope": scope}
 
 
 @router.get("/api/ai/history")
-async def ai_history(request: Request) -> dict[str, Any]:
-    """Return conversation history."""
-    return {"history": _conversation_history}
+async def ai_history(scope: str = "all") -> dict[str, Any]:
+    messages = await repo.get_ai_history(scope, limit=50)
+    return {"messages": messages}
 
 
-@router.post("/api/ai/summarize-changes", response_model=AIResponse)
+@router.post("/api/ai/summarize-changes")
 async def summarize_changes(body: AIQueryRequest, request: Request) -> dict[str, Any]:
-    """AI-powered change summary."""
     fetcher = request.app.state.fetcher
     scope = body.scope or "all"
-    structured = fetcher.get_structured(scope) or {"providers": {}}
+    structured = fetcher.get_structured(scope) or {}
     changes = await repo.get_changes(scope)
 
     analysis = await analyze_changes(changes, structured, scope)
-    return {"response": analysis, "scope": scope}
+
+    critical = sum(1 for c in changes if c.get("severity") == "critical")
+    risk = "critical" if critical > 0 else "warning" if len(changes) > 5 else "low"
+
+    return {"summary": analysis, "risk": risk, "changes_count": len(changes)}
