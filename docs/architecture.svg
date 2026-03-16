@@ -26,8 +26,8 @@
   <!-- Row 1: Config -->
   <g filter="url(#shadow)">
     <rect x="295" y="50" width="230" height="40" rx="10" fill="#21262d" stroke="#d29922" stroke-width="1.5"/>
-    <text x="320" y="75" fill="#e3b341" font-size="11" font-weight="600">&#9881; Settings + Accounts</text>
-    <text x="420" y="75" fill="#8b949e" font-size="9">pydantic-settings &#183; YAML</text>
+    <text x="320" y="75" fill="#e3b341" font-size="11" font-weight="600">&#9881; Settings</text>
+    <text x="380" y="75" fill="#8b949e" font-size="9">pydantic-settings &#183; env vars</text>
   </g>
 
   <line x1="410" y1="90" x2="410" y2="110" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arrow)"/>
@@ -35,8 +35,8 @@
   <!-- Row 2: Provider Registry -->
   <g filter="url(#shadow)">
     <rect x="255" y="114" width="310" height="40" rx="10" fill="#21262d" stroke="#8957e5" stroke-width="1.5"/>
-    <text x="280" y="139" fill="#d2a8ff" font-size="11" font-weight="600">&#8635; Provider Registry + Fetcher</text>
-    <text x="475" y="139" fill="#8b949e" font-size="9">async poll &#183; SSE</text>
+    <text x="280" y="139" fill="#d2a8ff" font-size="11" font-weight="600">&#8635; Registry + Auto-Discovery</text>
+    <text x="470" y="139" fill="#8b949e" font-size="9">async poll &#183; SSE</text>
   </g>
 
   <line x1="310" y1="154" x2="200" y2="180" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arrow)"/>

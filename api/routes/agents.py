@@ -19,7 +19,7 @@ async def agent_status(request: Request) -> dict[str, Any]:
             "status": "no_results",
             "message": "Agents haven't run yet. Wait for the next fetch cycle.",
         }
-    return results
+    return dict(results)
 
 
 @router.post("/api/agents/run")
@@ -43,7 +43,7 @@ async def trigger_agents(request: Request, scope: str = "all") -> dict[str, Any]
     health = run_health_checks(scope, structured)
 
     results = await supervisor.on_fetch_complete(scope, changes, health)
-    return results
+    return dict(results)
 
 
 @router.post("/api/agents/investigate")

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 import time
+from typing import Any
 
 from prometheus_client import Histogram
 
@@ -25,10 +26,12 @@ _query_sem = asyncio.Semaphore(_MAX_CONCURRENT)
 
 class AzureProvider(ProviderInterface):
     def __init__(self) -> None:
-        self._client = None
-        self._credential = None
+        self._client: Any = None
+        self._credential: Any = None
         self._auth_error: str | None = None
         self._sub_id_to_name: dict[str, str] = {}
+        self._ready = False
+        self._ready_lock = asyncio.Lock()
 
     def _init_client(self) -> None:
         if self._client is not None:
@@ -73,6 +76,16 @@ class AzureProvider(ProviderInterface):
             logger.error("Failed to list Azure subscriptions: %s", e)
             self._auth_error = f"Azure subscription discovery failed: {e}"
             return []
+
+    async def _ensure_ready(self) -> list[str]:
+        """Init client + discover subscriptions once; all fetch methods await this."""
+        async with self._ready_lock:
+            if self._ready:
+                return self._get_sub_ids()
+            self._init_client()
+            await asyncio.to_thread(self._discover_subscriptions)
+            self._ready = True
+        return self._get_sub_ids()
 
     def _query(self, query: str, sub_ids: list[str]) -> list[dict]:
         from azure.mgmt.resourcegraph.models import QueryRequest
@@ -171,15 +184,14 @@ class AzureProvider(ProviderInterface):
         )
 
     async def fetch_networks(self) -> list[NetworkResource]:
-        self._init_client()
-        sub_ids = await asyncio.to_thread(self._discover_subscriptions)
+        sub_ids = await self._ensure_ready()
         if not sub_ids:
             return []
         raw = await self._run_query("vnets", QUERIES["vnets"], sub_ids)
         return [self._normalize_network(r) for r in raw]
 
     async def fetch_networks_with_subnets(self) -> list[NetworkResource]:
-        sub_ids = self._get_sub_ids()
+        sub_ids = await self._ensure_ready()
         if not sub_ids:
             return []
         raw = await self._run_query(
@@ -188,14 +200,14 @@ class AzureProvider(ProviderInterface):
         return [self._normalize_network(r) for r in raw]
 
     async def fetch_resources(self) -> list[NetworkResource]:
-        sub_ids = self._get_sub_ids()
+        sub_ids = await self._ensure_ready()
         if not sub_ids:
             return []
         raw = await self._run_query("resources", QUERIES["resources"], sub_ids)
         return [self._normalize_resource(r) for r in raw]
 
     async def fetch_security_groups(self) -> list[NetworkResource]:
-        sub_ids = self._get_sub_ids()
+        sub_ids = await self._ensure_ready()
         if not sub_ids:
             return []
         raw = await self._run_query("nsgs", QUERIES["nsgs"], sub_ids)
