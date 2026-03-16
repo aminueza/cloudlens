@@ -1,8 +1,37 @@
 const PROVIDER_COLORS={aws:'#FF9900',azure:'#0078D4',gcp:'#4285F4'};
 const ENV_COLORS={prd:'#22c55e',stg:'#eab308',dev:'#3b82f6',global:'#a855f7',other:'#64748b'};
-const TYPE_COLORS={virtual_network:'#3b82f6',firewall:'#ef4444',security_group:'#ef4444',load_balancer:'#06b6d4',nat_gateway:'#f59e0b',vpn_gateway:'#f97316',private_endpoint:'#a855f7',public_ip:'#14b8a6',dns_zone:'#8b5cf6',bastion:'#64748b',express_route:'#eab308',waf:'#ec4899'};
-const TYPE_LABELS={virtual_network:'Network',firewall:'Firewall',security_group:'Security Group',load_balancer:'Load Balancer',nat_gateway:'NAT GW',vpn_gateway:'VPN GW',private_endpoint:'Private EP',public_ip:'Public IP',dns_zone:'DNS',bastion:'Bastion',express_route:'Express Route',waf:'WAF'};
-const KEY_TYPES=new Set(['firewall','load_balancer','vpn_gateway','bastion','express_route','nat_gateway','waf','dns_zone']);
+// Maps both long names (from resource_type) and short icon keys (from builder)
+const TYPE_COLORS={
+  vnet:'#3b82f6',virtual_network:'#3b82f6',
+  firewall:'#ef4444',
+  nsg:'#ef4444',security_group:'#ef4444',
+  lb:'#06b6d4',load_balancer:'#06b6d4',
+  nat:'#f59e0b',nat_gateway:'#f59e0b',
+  vpngw:'#f97316',vpn_gateway:'#f97316',
+  pe:'#a855f7',private_endpoint:'#a855f7',
+  pip:'#14b8a6',public_ip:'#14b8a6',
+  dns:'#8b5cf6',dns_zone:'#8b5cf6',
+  bastion:'#64748b',
+  er:'#eab308',express_route:'#eab308',
+  waf:'#ec4899',
+  nic:'#6366f1',network_interface:'#6366f1'
+};
+const TYPE_LABELS={
+  vnet:'Network',virtual_network:'Network',
+  firewall:'Firewall',
+  nsg:'Security Group',security_group:'Security Group',
+  lb:'Load Balancer',load_balancer:'Load Balancer',
+  nat:'NAT Gateway',nat_gateway:'NAT Gateway',
+  vpngw:'VPN Gateway',vpn_gateway:'VPN Gateway',
+  pe:'Private Endpoint',private_endpoint:'Private Endpoint',
+  pip:'Public IP',public_ip:'Public IP',
+  dns:'DNS Zone',dns_zone:'DNS Zone',
+  bastion:'Bastion',
+  er:'Express Route',express_route:'Express Route',
+  waf:'WAF',
+  nic:'NIC',network_interface:'NIC'
+};
+const KEY_TYPES=new Set(['firewall','lb','load_balancer','vpngw','vpn_gateway','bastion','er','express_route','nat','nat_gateway','waf','dns','dns_zone']);
 
 let D=null,simulation=null,svg=null,g=null,curEnv='all',searchQ='',isDark=true,_incSev='high';
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -93,7 +122,21 @@ function renderGraph(gd){
     .attr('fill',d=>((d.providerColor||d.productColor||'#3b82f6')+'18'))
     .attr('stroke',d=>d.providerColor||d.productColor||'#3b82f6')
     .attr('stroke-width',d=>d.type==='network'?2.5:1.5).attr('filter',d=>d.type==='network'?'url(#glow)':null);
-  const icons={vnet:'\u25C8',firewall:'\u2737',security_group:'\u26D4',load_balancer:'\u2696',nat_gateway:'\u27A1',vpn_gateway:'\u25B2',private_endpoint:'\u26BF',public_ip:'IP',dns_zone:'D',bastion:'\u2616',express_route:'\u26A1',waf:'\u2694'};
+  const icons={
+    vnet:'\u25C8',virtual_network:'\u25C8',
+    firewall:'\u2737',
+    nsg:'\u26D4',security_group:'\u26D4',
+    lb:'\u2696',load_balancer:'\u2696',
+    nat:'\u27A1',nat_gateway:'\u27A1',
+    vpngw:'\u25B2',vpn_gateway:'\u25B2',
+    pe:'\u26BF',private_endpoint:'\u26BF',
+    pip:'IP',public_ip:'IP',
+    dns:'D',dns_zone:'D',
+    bastion:'\u2616',
+    er:'\u26A1',express_route:'\u26A1',
+    waf:'\u2694',
+    nic:'\u2630',network_interface:'\u2630'
+  };
   node.append('text').text(d=>icons[d.icon]||'?').attr('text-anchor','middle').attr('dy',d=>d.type==='network'?5:3)
     .attr('font-size',d=>d.type==='network'?16:11).attr('fill',d=>TYPE_COLORS[d.icon]||'#94a3b8').attr('font-weight',700).attr('pointer-events','none');
   node.append('text').attr('class','node-label').attr('dy',d=>d.radius+12).attr('text-anchor','middle')

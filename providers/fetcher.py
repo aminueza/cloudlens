@@ -152,18 +152,45 @@ class BackgroundFetcher:
             )
 
     async def _post_fetch(self, scope: str, structured: dict[str, Any]) -> None:
-        """Save snapshot + run health checks + save results."""
+        """Save snapshot, detect changes, run health checks."""
+        snapshot_id = None
+
         # Save snapshot
         try:
             from db import repository as repo
 
-            await repo.save_snapshot(
+            snapshot_id = await repo.save_snapshot(
                 scope=scope,
                 graph_json=json.dumps(structured),
                 structured_json=json.dumps(structured),
             )
         except Exception:
             logger.debug("Could not save snapshot for %s", scope, exc_info=True)
+
+        # Change detection (diff against previous snapshot)
+        if snapshot_id is not None:
+            try:
+                from db import repository as repo
+                from engine.diff import compute_diff
+
+                prev = await repo.get_previous_snapshot(scope, snapshot_id)
+                if prev:
+                    prev_json = prev.get(
+                        "structured_json", prev.get("graph_json", "{}")
+                    )
+                    prev_structured = (
+                        json.loads(prev_json)
+                        if isinstance(prev_json, str)
+                        else prev_json
+                    )
+                    changes = compute_diff(
+                        scope, prev_structured, structured, snapshot_id
+                    )
+                    if changes:
+                        await repo.save_changes(changes)
+                        logger.info("Detected %d changes for %s", len(changes), scope)
+            except Exception:
+                logger.debug("Change detection failed for %s", scope, exc_info=True)
 
         # Health checks
         try:
