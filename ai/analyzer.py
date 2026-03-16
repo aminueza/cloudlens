@@ -2,100 +2,122 @@
 
 import asyncio
 import logging
-from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
-
-import anthropic
 
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+_client = None
+
 SYSTEM_PROMPT = (
     "You are an expert cloud network SRE assistant embedded in CloudLens, "
     "an AI-powered multi-cloud network intelligence platform. You have deep "
     "knowledge of AWS VPC, Azure VNet, GCP VPC, peerings, firewalls, security "
-    "groups, load balancers, gateways, and cross-cloud networking."
+    "groups, load balancers, gateways, and cross-cloud networking. "
+    "Be concise, technical, and actionable. Use bullet points. "
+    "When referencing resources, include their names, providers, and environments."
 )
 
-_client: anthropic.Anthropic | None = None
 
-
-def _get_client() -> anthropic.Anthropic:
+def _get_client():
     """Lazy-initialize the Anthropic client."""
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        try:
+            import anthropic
+
+            _client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        except Exception as e:
+            logger.warning("Failed to init Anthropic client: %s", e)
+            return None
     return _client
 
 
 def _summarize_topology(structured: dict[str, Any]) -> str:
-    """Create a compact text summary of the topology with provider labels."""
+    """Create a compact text summary of the topology."""
     lines: list[str] = []
-    providers = structured.get("providers", {})
-    for provider_name, provider_data in providers.items():
-        resources = provider_data.get("resources", [])
-        lines.append(f"[{provider_name.upper()}] {len(resources)} resources")
-        type_counts: Counter[str] = Counter()
-        for r in resources:
-            type_counts[r.get("type", "unknown")] += 1
-        for rtype, count in type_counts.most_common(10):
-            lines.append(f"  - {rtype}: {count}")
-        connections = provider_data.get("connections", [])
-        if connections:
-            lines.append(f"  - connections: {len(connections)}")
+    stats = structured.get("stats", {})
+    lines.append(
+        f"Topology: {stats.get('networks', 0)} networks, "
+        f"{stats.get('resources', 0)} resources, "
+        f"{stats.get('peerings', 0)} peerings, "
+        f"{stats.get('externalNetworks', 0)} external networks"
+    )
 
-    cross_cloud = structured.get("cross_cloud_connections", [])
-    if cross_cloud:
-        lines.append(f"[CROSS-CLOUD] {len(cross_cloud)} peerings/connections")
+    for v in structured.get("networks", [])[:30]:
+        res_summary: dict[str, int] = {}
+        for r in v.get("resources", []):
+            lbl = r.get("label", r.get("resource_type", "?"))
+            res_summary[lbl] = res_summary.get(lbl, 0) + 1
+        sg_count = len(v.get("securityGroups", []))
+        res_str = ", ".join(f"{c}x {t}" for t, c in res_summary.items())
+        ext = " [EXTERNAL]" if v.get("isExternal") else ""
+        provider = v.get("provider", "?").upper()
+        lines.append(
+            f"  [{provider}] {v.get('name', '?')} | env={v.get('env', '?')} | "
+            f"region={v.get('region', '?')} | addr={','.join(v.get('addressSpace', []))} | "
+            f"resources=[{res_str}] | sgs={sg_count}{ext}"
+        )
 
-    nodes = structured.get("nodes", [])
-    edges = structured.get("edges", [])
-    if nodes:
-        lines.append(f"Total nodes: {len(nodes)}")
-    if edges:
-        lines.append(f"Total edges: {len(edges)}")
+    for p in structured.get("peerings", [])[:20]:
+        src = p.get("source_network", p.get("fromId", "?"))
+        dst = p.get("target_network", p.get("toId", "?"))
+        lines.append(f"  Peering: {p.get('name', '?')} | {src} -> {dst} | state={p.get('state', '?')}")
 
-    return "\n".join(lines) if lines else "Empty topology"
+    unlinked = structured.get("unlinkedResources", [])
+    if unlinked:
+        lines.append(f"  Unlinked resources: {len(unlinked)}")
+
+    return "\n".join(lines)
 
 
 def _fallback_query(question: str, structured: dict[str, Any]) -> str:
     """Keyword-based fallback when AI is unavailable."""
     q = question.lower()
-    summary = _summarize_topology(structured)
-    nodes = structured.get("nodes", [])
-    edges = structured.get("edges", [])
+    stats = structured.get("stats", {})
+    networks = structured.get("networks", [])
+    peerings = structured.get("peerings", [])
 
-    if "how many" in q and ("resource" in q or "node" in q):
-        return f"There are {len(nodes)} resources in the topology."
-    if "how many" in q and ("connection" in q or "edge" in q):
-        return f"There are {len(edges)} connections in the topology."
-    if "vpc" in q or "vnet" in q:
-        vpcs = [n for n in nodes if n.get("type", "").lower() in ("vpc", "vnet")]
-        return f"Found {len(vpcs)} VPC/VNet resources."
-    if "firewall" in q or "security group" in q or "nsg" in q:
-        fws = [
-            n
-            for n in nodes
-            if "firewall" in n.get("type", "").lower()
-            or "security" in n.get("type", "").lower()
-        ]
-        return f"Found {len(fws)} firewall/security group resources."
-    return f"AI analysis is currently unavailable. Topology summary:\n{summary}"
+    if any(w in q for w in ["overview", "summary", "status", "how"]):
+        return (
+            f"Topology: {stats.get('networks', 0)} networks, "
+            f"{stats.get('resources', 0)} resources, {stats.get('peerings', 0)} peerings."
+        )
+    if any(w in q for w in ["peering", "peer", "connected"]):
+        lines = []
+        for p in peerings:
+            state = p.get("state", "?")
+            icon = "OK" if state in ("Connected", "active") else "FAIL"
+            lines.append(f"[{icon}] {p.get('name', '?')}: {state}")
+        return "\n".join(lines) or "No peerings found."
+    if any(w in q for w in ["firewall", "security", "nsg"]):
+        lines = []
+        for v in networks:
+            fw = [r for r in v.get("resources", []) if "firewall" in r.get("resource_type", "").lower()]
+            sgs = v.get("securityGroups", [])
+            if fw or sgs:
+                lines.append(f"{v.get('name', '?')} ({v.get('env', '?')}): {len(fw)} firewalls, {len(sgs)} SGs")
+        return "\n".join(lines) or "No firewall/security group data."
+    if any(w in q for w in ["issue", "problem", "wrong", "health"]):
+        return f"Topology has {stats.get('networks', 0)} networks, {stats.get('resources', 0)} resources. Check the Health tab for detailed checks."
+
+    return (
+        f"Topology: {stats.get('networks', 0)} networks, "
+        f"{stats.get('resources', 0)} resources, {stats.get('peerings', 0)} peerings.\n"
+        "(AI unavailable — set ANTHROPIC_API_KEY for intelligent answers)"
+    )
 
 
 def _fallback_changes_analysis(changes: list[dict[str, Any]]) -> str:
     """Basic change analysis without AI."""
     if not changes:
         return "No changes detected."
-    added = sum(1 for c in changes if c.get("action") == "added")
-    removed = sum(1 for c in changes if c.get("action") == "removed")
-    modified = sum(1 for c in changes if c.get("action") == "modified")
-    return (
-        f"Detected {len(changes)} changes: {added} added, "
-        f"{removed} removed, {modified} modified."
-    )
+    added = sum(1 for c in changes if c.get("change_type") == "added")
+    removed = sum(1 for c in changes if c.get("change_type") == "removed")
+    modified = sum(1 for c in changes if c.get("change_type") == "modified")
+    return f"Detected {len(changes)} changes: {added} added, {removed} removed, {modified} modified."
 
 
 def _fallback_incident_analysis(incident: dict[str, Any]) -> str:
@@ -134,7 +156,7 @@ def _rule_based_anomalies(
 
     # Rapid removal: more than 5 removals in last 10 changes
     recent = historical_changes[:10] if historical_changes else []
-    removals = [c for c in recent if c.get("action") == "removed"]
+    removals = [c for c in recent if c.get("change_type") == "removed"]
     if len(removals) > 5:
         anomalies.append(
             {
@@ -148,45 +170,31 @@ def _rule_based_anomalies(
             }
         )
 
-    # Environment drift: dev has firewalls but prod doesn't (or vice versa)
-    providers = current.get("providers", {})
-    env_firewall_counts: dict[str, int] = {}
-    for provider_name, pdata in providers.items():
-        for r in pdata.get("resources", []):
-            env = r.get("environment", r.get("env", "unknown"))
-            rtype = r.get("type", "").lower()
-            if "firewall" in rtype or "security" in rtype or "nsg" in rtype:
-                env_firewall_counts[env] = env_firewall_counts.get(env, 0) + 1
+    # Environment drift: dev has firewalls but prod doesn't
+    env_firewall: dict[str, bool] = {}
+    for v in current.get("networks", []):
+        if v.get("isExternal"):
+            continue
+        env = v.get("env", "other")
+        has_fw = any("firewall" in r.get("resource_type", "").lower() for r in v.get("resources", []))
+        if has_fw:
+            env_firewall[env] = True
 
-    if "dev" in env_firewall_counts and "prod" not in env_firewall_counts:
+    if "dev" in env_firewall and "prd" not in env_firewall:
         anomalies.append(
             {
                 "type": "env_drift",
-                "severity": "medium",
-                "description": (
-                    "Dev environment has firewall rules but prod does not. "
-                    "This may indicate a security gap in production."
-                ),
-                "detected_at": now,
-            }
-        )
-    elif "prod" in env_firewall_counts and "dev" not in env_firewall_counts:
-        anomalies.append(
-            {
-                "type": "env_drift",
-                "severity": "low",
-                "description": (
-                    "Prod has firewall rules but dev does not. "
-                    "Dev environment may be under-secured."
-                ),
+                "severity": "critical",
+                "description": "Dev has firewalls but Production does not — possible configuration drift",
                 "detected_at": now,
             }
         )
 
     # Cross-cloud drift: resource count divergence between providers
     provider_resource_counts: dict[str, int] = {}
-    for provider_name, pdata in providers.items():
-        provider_resource_counts[provider_name] = len(pdata.get("resources", []))
+    for v in current.get("networks", []):
+        p = v.get("provider", "unknown")
+        provider_resource_counts[p] = provider_resource_counts.get(p, 0) + len(v.get("resources", []))
 
     if len(provider_resource_counts) >= 2:
         counts = list(provider_resource_counts.values())
@@ -268,8 +276,8 @@ async def analyze_changes(
         client = _get_client()
         topo_summary = _summarize_topology(structured)
         changes_text = "\n".join(
-            f"- {c.get('action', '?')} {c.get('resource_type', '?')} "
-            f"{c.get('resource_id', '?')} ({c.get('provider', '?')})"
+            f"- [{c.get('change_type', '?').upper()}] {c.get('resource_type', '?')}: "
+            f"{c.get('resource_name', c.get('resource_id', '?'))}"
             for c in changes[:50]
         )
 
