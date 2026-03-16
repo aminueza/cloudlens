@@ -291,8 +291,12 @@ def build_structured_graph(
 
         peering_entries.append(
             {
+                "id": _attr(p, "id") or f"peer_{src}_{tgt}",
+                "name": _attr(p, "name") or "",
                 "source": safe_id(f"net_{src}"),
                 "target": safe_id(f"net_{tgt}"),
+                "fromId": safe_id(f"net_{src}"),
+                "toId": safe_id(f"net_{tgt}"),
                 "sourceName": src,
                 "targetName": tgt,
                 "state": state,

@@ -62,10 +62,19 @@ def _summarize_topology(structured: dict[str, Any]) -> str:
         )
 
     for p in structured.get("peerings", [])[:20]:
-        src = p.get("source_network", p.get("fromId", "?"))
-        dst = p.get("target_network", p.get("toId", "?"))
+        name = p.get("name") or p.get("id", "?")
+        src = p.get("sourceName", p.get("source", "?"))
+        dst = p.get("targetName", p.get("target", "?"))
+        # Extract VNet name from full provider ID (e.g. azure_sub_vnet-name → vnet-name)
+        for prefix in ("azure_", "aws_", "gcp_"):
+            if prefix in str(src):
+                parts = str(src).rsplit("_", 1)
+                src = parts[-1] if len(parts) > 1 else src
+            if prefix in str(dst):
+                parts = str(dst).rsplit("_", 1)
+                dst = parts[-1] if len(parts) > 1 else dst
         lines.append(
-            f"  Peering: {p.get('name', '?')} | {src} -> {dst} | state={p.get('state', '?')}"
+            f"  Peering: {name} | {src} -> {dst} | state={p.get('state', '?')}"
         )
 
     unlinked = structured.get("unlinkedResources", [])
