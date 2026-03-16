@@ -64,7 +64,9 @@ def _summarize_topology(structured: dict[str, Any]) -> str:
     for p in structured.get("peerings", [])[:20]:
         src = p.get("source_network", p.get("fromId", "?"))
         dst = p.get("target_network", p.get("toId", "?"))
-        lines.append(f"  Peering: {p.get('name', '?')} | {src} -> {dst} | state={p.get('state', '?')}")
+        lines.append(
+            f"  Peering: {p.get('name', '?')} | {src} -> {dst} | state={p.get('state', '?')}"
+        )
 
     unlinked = structured.get("unlinkedResources", [])
     if unlinked:
@@ -95,10 +97,16 @@ def _fallback_query(question: str, structured: dict[str, Any]) -> str:
     if any(w in q for w in ["firewall", "security", "nsg"]):
         lines = []
         for v in networks:
-            fw = [r for r in v.get("resources", []) if "firewall" in r.get("resource_type", "").lower()]
+            fw = [
+                r
+                for r in v.get("resources", [])
+                if "firewall" in r.get("resource_type", "").lower()
+            ]
             sgs = v.get("securityGroups", [])
             if fw or sgs:
-                lines.append(f"{v.get('name', '?')} ({v.get('env', '?')}): {len(fw)} firewalls, {len(sgs)} SGs")
+                lines.append(
+                    f"{v.get('name', '?')} ({v.get('env', '?')}): {len(fw)} firewalls, {len(sgs)} SGs"
+                )
         return "\n".join(lines) or "No firewall/security group data."
     if any(w in q for w in ["issue", "problem", "wrong", "health"]):
         return f"Topology has {stats.get('networks', 0)} networks, {stats.get('resources', 0)} resources. Check the Health tab for detailed checks."
@@ -176,7 +184,10 @@ def _rule_based_anomalies(
         if v.get("isExternal"):
             continue
         env = v.get("env", "other")
-        has_fw = any("firewall" in r.get("resource_type", "").lower() for r in v.get("resources", []))
+        has_fw = any(
+            "firewall" in r.get("resource_type", "").lower()
+            for r in v.get("resources", [])
+        )
         if has_fw:
             env_firewall[env] = True
 
@@ -194,7 +205,9 @@ def _rule_based_anomalies(
     provider_resource_counts: dict[str, int] = {}
     for v in current.get("networks", []):
         p = v.get("provider", "unknown")
-        provider_resource_counts[p] = provider_resource_counts.get(p, 0) + len(v.get("resources", []))
+        provider_resource_counts[p] = provider_resource_counts.get(p, 0) + len(
+            v.get("resources", [])
+        )
 
     if len(provider_resource_counts) >= 2:
         counts = list(provider_resource_counts.values())

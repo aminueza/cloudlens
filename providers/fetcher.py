@@ -60,7 +60,9 @@ class BackgroundFetcher:
         try:
             loop = asyncio.get_running_loop()
             self._task = loop.create_task(self._poll_loop())
-            logger.info("Background fetcher started (interval=%ds)", self._poll_interval)
+            logger.info(
+                "Background fetcher started (interval=%ds)", self._poll_interval
+            )
         except RuntimeError:
             logger.warning("No running event loop; fetcher will not auto-poll")
 
@@ -87,9 +89,14 @@ class BackgroundFetcher:
     async def _fetch_cycle(self) -> None:
         """Fetch from all providers, build graphs, cache, notify."""
         try:
-            networks, networks_sub, resources, sgs, interfaces, peerings = (
-                await self._registry.fetch_all(ACCOUNTS)
-            )
+            (
+                networks,
+                networks_sub,
+                resources,
+                sgs,
+                interfaces,
+                peerings,
+            ) = await self._registry.fetch_all(ACCOUNTS)
 
             logger.info(
                 "Fetched: %d networks, %d resources, %d SGs, %d peerings",
@@ -114,12 +121,16 @@ class BackgroundFetcher:
             # Post-fetch: save snapshot, health checks, etc.
             await self._post_fetch("all", structured)
 
-            self._notify(json.dumps({
-                "type": "update",
-                "scope": "all",
-                "generation": self._generation,
-                "timestamp": datetime.now(UTC).isoformat(),
-            }))
+            self._notify(
+                json.dumps(
+                    {
+                        "type": "update",
+                        "scope": "all",
+                        "generation": self._generation,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                )
+            )
 
             logger.info(
                 "Fetch cycle %d complete: %d networks, %d peerings",
@@ -130,11 +141,15 @@ class BackgroundFetcher:
 
         except Exception:
             logger.exception("Fetch cycle failed")
-            self._notify(json.dumps({
-                "type": "auth_error",
-                "errors": self._registry.get_auth_errors(),
-                "timestamp": datetime.now(UTC).isoformat(),
-            }))
+            self._notify(
+                json.dumps(
+                    {
+                        "type": "auth_error",
+                        "errors": self._registry.get_auth_errors(),
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                )
+            )
 
     async def _post_fetch(self, scope: str, structured: dict[str, Any]) -> None:
         """Save snapshot + run health checks + save results."""
