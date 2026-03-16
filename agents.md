@@ -48,7 +48,7 @@ AI-powered multi-cloud network intelligence platform for SREs — monitors topol
 ## Project Layout
 
 ```
-config/            Settings (pydantic-settings), accounts.yaml, structured logging
+config/            Settings (pydantic-settings), structured logging
 providers/         Cloud provider abstraction layer
   base.py            ProviderInterface ABC + NetworkResource/NetworkPeering dataclasses
   registry.py        Auto-discovers and loads enabled providers
@@ -90,11 +90,11 @@ tests/             pytest — 32 tests across 7 files
 ## Key Data Flow
 
 ```
-accounts.yaml
-    ↓
 Settings (pydantic-settings, env vars)
     ↓
 ProviderRegistry (loads enabled providers: aws, azure, gcp)
+    ↓
+Auto-discovery (Azure subscriptions, AWS regions/account, GCP projects)
     ↓
 BackgroundFetcher._poll_loop()
     ↓
@@ -156,7 +156,7 @@ docker build -t cloudlens .                                      # Build contain
 1. Create `providers/{name}/client.py` implementing `ProviderInterface`
 2. Add optional dep in `pyproject.toml`: `[project.optional-dependencies.{name}]`
 3. Register in `providers/registry.py`
-4. Add account config section in `config/accounts.yaml`
+4. Implement `get_discovered_accounts()` to return discovered accounts
 5. No changes needed in graph/, engine/, ai/, api/ — they're cloud-agnostic
 
 ### Add a New Resource Type
@@ -176,7 +176,7 @@ docker build -t cloudlens .                                      # Build contain
 ## Gotchas
 
 - `graph.js` is ~400 lines — search within it, don't read fully
-- Accounts load at import time from `config/accounts.yaml` — missing file = crash
+- Accounts are auto-discovered at runtime — no static config needed
 - BackgroundFetcher pauses per-provider on auth failure (60s retry)
 - Cloud SDKs are optional: `pip install cloudlens[aws]`, `cloudlens[azure]`, `cloudlens[all-providers]`
 - GCP is a stub — returns empty lists, no actual API calls

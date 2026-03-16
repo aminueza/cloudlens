@@ -58,4 +58,4 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 
 [tool.setuptools.packages.find]
-include = ["config*", "providers*", "graph*", "db*", "engine*", "ai*", "api*", "exporters*"]
+include = ["config*", "providers*", "graph*", "db*", "engine*", "ai*", "api*", "exporters*", "agents*"]

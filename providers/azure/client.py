@@ -24,13 +24,13 @@ _query_sem = asyncio.Semaphore(_MAX_CONCURRENT)
 
 
 class AzureProvider(ProviderInterface):
-    def __init__(self):
+    def __init__(self) -> None:
         self._client = None
         self._credential = None
         self._auth_error: str | None = None
         self._sub_id_to_name: dict[str, str] = {}
 
-    def _init_client(self, subscriptions: dict[str, str]) -> None:
+    def _init_client(self) -> None:
         if self._client is not None:
             return
         try:
@@ -44,10 +44,35 @@ class AzureProvider(ProviderInterface):
                 retry_policy=RetryPolicy(retry_total=3, retry_backoff_factor=0.5),
                 connection_verify=True,
             )
-            self._sub_id_to_name = {v: k for k, v in subscriptions.items()}
         except Exception as e:
             self._auth_error = f"Azure SDK init failed: {e}"
             logger.error("Azure init failed: %s", e)
+
+    def _discover_subscriptions(self) -> list[str]:
+        """Auto-discover all Azure subscriptions the credential has access to."""
+        if not self._credential:
+            return []
+        try:
+            from azure.mgmt.subscription import SubscriptionClient
+
+            sub_client = SubscriptionClient(self._credential)
+            sub_ids: list[str] = []
+            for sub in sub_client.subscriptions.list():
+                if sub.state and sub.state.value == "Enabled":
+                    sub_id = sub.subscription_id or ""
+                    display_name = sub.display_name or sub_id
+                    sub_ids.append(sub_id)
+                    self._sub_id_to_name[sub_id] = display_name
+            logger.info(
+                "Discovered %d Azure subscriptions: %s",
+                len(sub_ids),
+                ", ".join(self._sub_id_to_name.values()),
+            )
+            return sub_ids
+        except Exception as e:
+            logger.error("Failed to list Azure subscriptions: %s", e)
+            self._auth_error = f"Azure subscription discovery failed: {e}"
+            return []
 
     def _query(self, query: str, sub_ids: list[str]) -> list[dict]:
         from azure.mgmt.resourcegraph.models import QueryRequest
@@ -106,10 +131,9 @@ class AzureProvider(ProviderInterface):
             return "Azure authentication failed. Run: az login"
         return f"Azure auth error: {msg[:200]}"
 
-    def _sub_ids(self, accounts: dict) -> list[str]:
-        subs = accounts.get("subscriptions", {})
-        self._sub_id_to_name = {v: k for k, v in subs.items()}
-        return list(subs.values())
+    def _get_sub_ids(self) -> list[str]:
+        """Return all discovered subscription IDs."""
+        return list(self._sub_id_to_name.keys())
 
     def _normalize_network(self, raw: dict) -> NetworkResource:
         sub_id = raw["subscriptionId"]
@@ -146,19 +170,16 @@ class AzureProvider(ProviderInterface):
             provisioning_state=raw.get("provisioningState", ""),
         )
 
-    async def fetch_networks(self, accounts: dict) -> list[NetworkResource]:
-        self._init_client(accounts.get("subscriptions", {}))
-        sub_ids = self._sub_ids(accounts)
+    async def fetch_networks(self) -> list[NetworkResource]:
+        self._init_client()
+        sub_ids = await asyncio.to_thread(self._discover_subscriptions)
         if not sub_ids:
             return []
         raw = await self._run_query("vnets", QUERIES["vnets"], sub_ids)
         return [self._normalize_network(r) for r in raw]
 
-    async def fetch_networks_with_subnets(
-        self, accounts: dict
-    ) -> list[NetworkResource]:
-        self._init_client(accounts.get("subscriptions", {}))
-        sub_ids = self._sub_ids(accounts)
+    async def fetch_networks_with_subnets(self) -> list[NetworkResource]:
+        sub_ids = self._get_sub_ids()
         if not sub_ids:
             return []
         raw = await self._run_query(
@@ -166,17 +187,15 @@ class AzureProvider(ProviderInterface):
         )
         return [self._normalize_network(r) for r in raw]
 
-    async def fetch_resources(self, accounts: dict) -> list[NetworkResource]:
-        self._init_client(accounts.get("subscriptions", {}))
-        sub_ids = self._sub_ids(accounts)
+    async def fetch_resources(self) -> list[NetworkResource]:
+        sub_ids = self._get_sub_ids()
         if not sub_ids:
             return []
         raw = await self._run_query("resources", QUERIES["resources"], sub_ids)
         return [self._normalize_resource(r) for r in raw]
 
-    async def fetch_security_groups(self, accounts: dict) -> list[NetworkResource]:
-        self._init_client(accounts.get("subscriptions", {}))
-        sub_ids = self._sub_ids(accounts)
+    async def fetch_security_groups(self) -> list[NetworkResource]:
+        sub_ids = self._get_sub_ids()
         if not sub_ids:
             return []
         raw = await self._run_query("nsgs", QUERIES["nsgs"], sub_ids)
@@ -200,9 +219,8 @@ class AzureProvider(ProviderInterface):
             )
         return result
 
-    async def fetch_network_interfaces(self, accounts: dict) -> list[NetworkResource]:
-        self._init_client(accounts.get("subscriptions", {}))
-        sub_ids = self._sub_ids(accounts)
+    async def fetch_network_interfaces(self) -> list[NetworkResource]:
+        sub_ids = self._get_sub_ids()
         if not sub_ids:
             return []
         raw = await self._run_query("nics", QUERIES["nics"], sub_ids)
@@ -240,9 +258,8 @@ class AzureProvider(ProviderInterface):
             )
         return result
 
-    async def fetch_peerings(self, accounts: dict) -> list[NetworkPeering]:
-        self._init_client(accounts.get("subscriptions", {}))
-        sub_ids = self._sub_ids(accounts)
+    async def fetch_peerings(self) -> list[NetworkPeering]:
+        sub_ids = self._get_sub_ids()
         if not sub_ids:
             return []
         raw = await self._run_query("vnets", QUERIES["vnets"], sub_ids)
@@ -290,3 +307,7 @@ class AzureProvider(ProviderInterface):
 
     def get_provider_name(self) -> str:
         return "azure"
+
+    def get_discovered_accounts(self) -> dict[str, str]:
+        """Return mapping of subscription_id -> display_name."""
+        return dict(self._sub_id_to_name)

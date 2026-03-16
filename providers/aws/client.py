@@ -8,6 +8,8 @@ from providers.base import NetworkPeering, NetworkResource, ProviderInterface
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_REGIONS = ["us-east-1", "us-west-2", "eu-west-1", "eu-central-1"]
+
 
 def _aws_tags_to_dict(tags: list[dict] | None) -> dict[str, str]:
     if not tags:
@@ -20,8 +22,10 @@ def _get_tag(tags: dict[str, str], key: str, default: str = "") -> str:
 
 
 class AWSProvider(ProviderInterface):
-    def __init__(self):
+    def __init__(self) -> None:
         self._auth_error: str | None = None
+        self._regions: list[str] = []
+        self._account_id: str = ""
 
     def _get_session(self):
         try:
@@ -39,9 +43,41 @@ class AWSProvider(ProviderInterface):
         session = self._get_session()
         return session.client(service, region_name=region)
 
+    def _discover(self) -> None:
+        """Discover AWS account ID and available regions."""
+        if self._regions:
+            return
+        try:
+            session = self._get_session()
+            # Get account ID via STS
+            sts = session.client("sts")
+            identity = sts.get_caller_identity()
+            self._account_id = identity.get("Account", "")
+            # Discover enabled regions
+            ec2 = session.client("ec2", region_name="us-east-1")
+            response = ec2.describe_regions(
+                Filters=[
+                    {
+                        "Name": "opt-in-status",
+                        "Values": ["opt-in-not-required", "opted-in"],
+                    }
+                ]
+            )
+            self._regions = [r["RegionName"] for r in response.get("Regions", [])]
+            if not self._regions:
+                self._regions = list(_DEFAULT_REGIONS)
+            logger.info(
+                "Discovered AWS account %s with %d regions",
+                self._account_id,
+                len(self._regions),
+            )
+        except Exception as e:
+            logger.warning("AWS discovery failed, using defaults: %s", e)
+            self._regions = list(_DEFAULT_REGIONS)
+
     async def _describe(
-        self, service: str, region: str, method: str, key: str, **kwargs
-    ) -> list[dict]:
+        self, service: str, region: str, method: str, key: str, **kwargs: Any
+    ) -> list[dict[str, Any]]:
         try:
             client = await asyncio.to_thread(self._get_client, service, region)
             fn = getattr(client, method)
@@ -63,13 +99,6 @@ class AWSProvider(ProviderInterface):
                 logger.warning("AWS %s.%s failed in %s: %s", service, method, region, e)
             return []
 
-    def _get_regions(self, accounts: dict) -> list[str]:
-        regions: list[str] = []
-        for acct in accounts.values():
-            if isinstance(acct, dict) and "regions" in acct:
-                regions.extend(acct["regions"])
-        return list(set(regions)) or ["us-east-1"]
-
     def _get_env(self, tags: dict[str, str], acct_name: str = "") -> str:
         env = _get_tag(tags, "Environment", "").lower()
         if env in ("dev", "stg", "prd", "global"):
@@ -78,8 +107,8 @@ class AWSProvider(ProviderInterface):
 
         return get_env(acct_name)
 
-    async def fetch_networks(self, accounts: dict) -> list[NetworkResource]:
-        regions = self._get_regions(accounts)
+    async def fetch_networks(self) -> list[NetworkResource]:
+        await asyncio.to_thread(self._discover)
         results: list[NetworkResource] = []
 
         async def _fetch_region(region: str) -> None:
@@ -93,7 +122,7 @@ class AWSProvider(ProviderInterface):
                         name=name,
                         resource_type="virtual_network",
                         provider="aws",
-                        account_id=vpc.get("OwnerId", ""),
+                        account_id=vpc.get("OwnerId", self._account_id),
                         account_name=_get_tag(tags, "Name", ""),
                         region=region,
                         environment=self._get_env(tags),
@@ -108,13 +137,10 @@ class AWSProvider(ProviderInterface):
                     )
                 )
 
-        await asyncio.gather(*[_fetch_region(r) for r in regions])
+        await asyncio.gather(*[_fetch_region(r) for r in self._regions])
         return results
 
-    async def fetch_networks_with_subnets(
-        self, accounts: dict
-    ) -> list[NetworkResource]:
-        regions = self._get_regions(accounts)
+    async def fetch_networks_with_subnets(self) -> list[NetworkResource]:
         results: list[NetworkResource] = []
 
         async def _fetch_region(region: str) -> None:
@@ -127,7 +153,7 @@ class AWSProvider(ProviderInterface):
                         name=_get_tag(tags, "Name", s["SubnetId"]),
                         resource_type="virtual_network",
                         provider="aws",
-                        account_id=s.get("OwnerId", ""),
+                        account_id=s.get("OwnerId", self._account_id),
                         account_name="",
                         region=region,
                         environment=self._get_env(tags),
@@ -139,11 +165,10 @@ class AWSProvider(ProviderInterface):
                     )
                 )
 
-        await asyncio.gather(*[_fetch_region(r) for r in regions])
+        await asyncio.gather(*[_fetch_region(r) for r in self._regions])
         return results
 
-    async def fetch_resources(self, accounts: dict) -> list[NetworkResource]:
-        regions = self._get_regions(accounts)
+    async def fetch_resources(self) -> list[NetworkResource]:
         results: list[NetworkResource] = []
 
         async def _fetch_region(region: str) -> None:
@@ -159,7 +184,7 @@ class AWSProvider(ProviderInterface):
                         name=_get_tag(tags, "Name", n["NatGatewayId"]),
                         resource_type="nat_gateway",
                         provider="aws",
-                        account_id="",
+                        account_id=self._account_id,
                         account_name="",
                         region=region,
                         environment=self._get_env(tags),
@@ -182,7 +207,7 @@ class AWSProvider(ProviderInterface):
                         name=_get_tag(tags, "Name", eip.get("PublicIp", "")),
                         resource_type="public_ip",
                         provider="aws",
-                        account_id="",
+                        account_id=self._account_id,
                         account_name="",
                         region=region,
                         environment=self._get_env(tags),
@@ -207,7 +232,7 @@ class AWSProvider(ProviderInterface):
                         name=_get_tag(tags, "Name", gw["VpnGatewayId"]),
                         resource_type="vpn_gateway",
                         provider="aws",
-                        account_id="",
+                        account_id=self._account_id,
                         account_name="",
                         region=region,
                         environment=self._get_env(tags),
@@ -218,11 +243,10 @@ class AWSProvider(ProviderInterface):
                     )
                 )
 
-        await asyncio.gather(*[_fetch_region(r) for r in regions])
+        await asyncio.gather(*[_fetch_region(r) for r in self._regions])
         return results
 
-    async def fetch_security_groups(self, accounts: dict) -> list[NetworkResource]:
-        regions = self._get_regions(accounts)
+    async def fetch_security_groups(self) -> list[NetworkResource]:
         results: list[NetworkResource] = []
 
         async def _fetch_region(region: str) -> None:
@@ -240,7 +264,7 @@ class AWSProvider(ProviderInterface):
                         name=sg.get("GroupName", sg["GroupId"]),
                         resource_type="security_group",
                         provider="aws",
-                        account_id=sg.get("OwnerId", ""),
+                        account_id=sg.get("OwnerId", self._account_id),
                         account_name="",
                         region=region,
                         environment=self._get_env(tags),
@@ -251,11 +275,10 @@ class AWSProvider(ProviderInterface):
                     )
                 )
 
-        await asyncio.gather(*[_fetch_region(r) for r in regions])
+        await asyncio.gather(*[_fetch_region(r) for r in self._regions])
         return results
 
-    async def fetch_network_interfaces(self, accounts: dict) -> list[NetworkResource]:
-        regions = self._get_regions(accounts)
+    async def fetch_network_interfaces(self) -> list[NetworkResource]:
         results: list[NetworkResource] = []
 
         async def _fetch_region(region: str) -> None:
@@ -273,7 +296,7 @@ class AWSProvider(ProviderInterface):
                         name=_get_tag(tags, "Name", eni["NetworkInterfaceId"]),
                         resource_type="network_interface",
                         provider="aws",
-                        account_id=eni.get("OwnerId", ""),
+                        account_id=eni.get("OwnerId", self._account_id),
                         account_name="",
                         region=region,
                         environment=self._get_env(tags),
@@ -285,11 +308,10 @@ class AWSProvider(ProviderInterface):
                     )
                 )
 
-        await asyncio.gather(*[_fetch_region(r) for r in regions])
+        await asyncio.gather(*[_fetch_region(r) for r in self._regions])
         return results
 
-    async def fetch_peerings(self, accounts: dict) -> list[NetworkPeering]:
-        regions = self._get_regions(accounts)
+    async def fetch_peerings(self) -> list[NetworkPeering]:
         results: list[NetworkPeering] = []
         seen: set[str] = set()
 
@@ -323,7 +345,7 @@ class AWSProvider(ProviderInterface):
                     )
                 )
 
-        await asyncio.gather(*[_fetch_region(r) for r in regions])
+        await asyncio.gather(*[_fetch_region(r) for r in self._regions])
         return results
 
     def get_auth_error(self) -> str | None:
@@ -334,3 +356,8 @@ class AWSProvider(ProviderInterface):
 
     def get_provider_name(self) -> str:
         return "aws"
+
+    def get_discovered_accounts(self) -> dict[str, str]:
+        if self._account_id:
+            return {self._account_id: f"aws-{self._account_id}"}
+        return {}

@@ -58,7 +58,14 @@ class ProviderRegistry:
     def has_auth_error(self) -> bool:
         return any(p.get_auth_error() for p in self._providers.values())
 
-    async def fetch_all(self, accounts_config: dict) -> tuple[
+    def get_all_discovered_accounts(self) -> dict[str, str]:
+        """Collect all discovered account names across providers."""
+        accounts: dict[str, str] = {}
+        for provider in self._providers.values():
+            accounts.update(provider.get_discovered_accounts())
+        return accounts
+
+    async def fetch_all(self) -> tuple[
         list[NetworkResource],
         list[NetworkResource],
         list[NetworkResource],
@@ -74,15 +81,14 @@ class ProviderRegistry:
         all_peerings: list[NetworkPeering] = []
 
         async def _fetch_provider(name: str, provider: ProviderInterface) -> None:
-            provider_accounts = accounts_config.get(name, {})
             try:
                 nets, nets_sub, res, sgs, ifaces, peers = await asyncio.gather(
-                    provider.fetch_networks(provider_accounts),
-                    provider.fetch_networks_with_subnets(provider_accounts),
-                    provider.fetch_resources(provider_accounts),
-                    provider.fetch_security_groups(provider_accounts),
-                    provider.fetch_network_interfaces(provider_accounts),
-                    provider.fetch_peerings(provider_accounts),
+                    provider.fetch_networks(),
+                    provider.fetch_networks_with_subnets(),
+                    provider.fetch_resources(),
+                    provider.fetch_security_groups(),
+                    provider.fetch_network_interfaces(),
+                    provider.fetch_peerings(),
                 )
                 all_networks.extend(nets)
                 all_networks_subnets.extend(nets_sub)

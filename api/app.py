@@ -28,7 +28,7 @@ from api.routes import (
     topology,
 )
 from config.logging import setup_logging
-from config.settings import PRODUCTS, settings
+from config.settings import settings
 from db.session import close_db, init_db
 from providers.fetcher import BackgroundFetcher
 from providers.registry import ProviderRegistry
@@ -150,7 +150,9 @@ async def auth_status():
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    fetcher = getattr(request.app.state, "fetcher", None)
+    products = fetcher.get_discovered_products() if fetcher else []
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "products": PRODUCTS},
+        {"request": request, "products": products},
     )

@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class GCPProvider(ProviderInterface):
-    def __init__(self):
+    def __init__(self) -> None:
         self._auth_error: str | None = None
         try:
             import google.cloud.compute_v1  # noqa: F401
@@ -18,24 +18,22 @@ class GCPProvider(ProviderInterface):
             self._auth_error = "GCP SDK not installed. Run: pip install cloudlens[gcp]"
             logger.info("GCP provider loaded in stub mode (SDK not installed)")
 
-    async def fetch_networks(self, accounts: dict) -> list[NetworkResource]:
+    async def fetch_networks(self) -> list[NetworkResource]:
         return []
 
-    async def fetch_networks_with_subnets(
-        self, accounts: dict
-    ) -> list[NetworkResource]:
+    async def fetch_networks_with_subnets(self) -> list[NetworkResource]:
         return []
 
-    async def fetch_resources(self, accounts: dict) -> list[NetworkResource]:
+    async def fetch_resources(self) -> list[NetworkResource]:
         return []
 
-    async def fetch_security_groups(self, accounts: dict) -> list[NetworkResource]:
+    async def fetch_security_groups(self) -> list[NetworkResource]:
         return []
 
-    async def fetch_network_interfaces(self, accounts: dict) -> list[NetworkResource]:
+    async def fetch_network_interfaces(self) -> list[NetworkResource]:
         return []
 
-    async def fetch_peerings(self, accounts: dict) -> list[NetworkPeering]:
+    async def fetch_peerings(self) -> list[NetworkPeering]:
         return []
 
     def get_auth_error(self) -> str | None:

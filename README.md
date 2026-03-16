@@ -159,36 +159,15 @@ Create incidents with automatic topology snapshot capture, health issue enrichme
 | `AI_MODEL` | `claude-sonnet-4-20250514` | Claude model to use |
 | `DB_PATH` | `data/cloudlens.db` | SQLite database path |
 | `SNAPSHOT_RETENTION` | `100` | Max snapshots to keep per scope |
-| `ACCOUNTS_FILE` | `config/accounts.yaml` | Path to account registry |
+### Auto-Discovery
 
-### Account Registry
+CloudLens **automatically discovers** all networks, subscriptions, and accounts from each enabled provider using the authenticated credentials. No static account configuration is needed.
 
-Configure your cloud accounts in `config/accounts.yaml`:
+- **Azure**: Lists all enabled subscriptions via `SubscriptionClient` and queries Azure Resource Graph across all of them.
+- **AWS**: Discovers the current account via STS and lists all enabled regions via EC2 `describe_regions`.
+- **GCP**: *(Stub)* — will auto-discover projects when SDK is installed.
 
-```yaml
-providers:
-  aws:
-    accounts:
-      platform-dev:
-        account_id: "123456789012"
-        regions: ["us-east-1", "eu-west-1"]
-      platform-prd:
-        account_id: "987654321098"
-        regions: ["us-east-1", "eu-west-1"]
-
-  azure:
-    subscriptions:
-      webapp-dev: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-      webapp-prd: "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy"
-
-  gcp:
-    projects:
-      networking-dev:
-        project_id: "my-org-networking-dev"
-        regions: ["us-central1", "europe-west1"]
-```
-
-Product names are derived by stripping `-dev`, `-stg`, `-prd`, `-global` suffixes.
+Product names shown in the UI are derived by stripping `-dev`, `-stg`, `-prd`, `-global` suffixes from the discovered subscription/account display names.
 
 ---
 

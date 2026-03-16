@@ -1,11 +1,6 @@
 import re
-from pathlib import Path
-from typing import Any
 
-import yaml
 from pydantic_settings import BaseSettings
-
-_BASE_DIR = Path(__file__).resolve().parent
 
 
 class Settings(BaseSettings):
@@ -17,7 +12,6 @@ class Settings(BaseSettings):
     CLOUDLENS_CORS_ORIGINS: str = "*"
     CLOUDLENS_API_KEY: str = ""
     ENABLED_PROVIDERS: str = "azure"
-    ACCOUNTS_FILE: str = "config/accounts.yaml"
     ANTHROPIC_API_KEY: str = ""
     AI_MODEL: str = "claude-sonnet-4-20250514"
     DB_PATH: str = "data/cloudlens.db"
@@ -29,56 +23,14 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
-def _load_accounts(path: str | None = None) -> dict[Any, Any]:
-    p = Path(path) if path else _BASE_DIR / "accounts.yaml"
-    with open(p) as f:
-        data: dict[Any, Any] = yaml.safe_load(f)
-    result: dict[Any, Any] = data.get("providers", {})
-    return result
-
-
-ACCOUNTS: dict = _load_accounts()
-
-
-def _derive_account_names() -> list[str]:
-    names: list[str] = []
-    for provider_cfg in ACCOUNTS.values():
-        if isinstance(provider_cfg, dict):
-            for key in ("subscriptions", "accounts", "projects"):
-                if key in provider_cfg:
-                    section = provider_cfg[key]
-                    if isinstance(section, dict):
-                        names.extend(section.keys())
-    return names
-
-
-ALL_ACCOUNT_NAMES: list[str] = _derive_account_names()
-
-ACCOUNT_TO_PRODUCT: dict[str, str] = {
-    name: re.sub(r"-(dev|stg|prd|global)$", "", name) for name in ALL_ACCOUNT_NAMES
-}
-
-PRODUCTS: list[str] = sorted(set(ACCOUNT_TO_PRODUCT.values()))
-
-
 def get_env(account_name: str) -> str:
+    """Derive environment from an account/subscription name suffix."""
     for e in ("dev", "stg", "prd", "global"):
         if account_name.endswith(f"-{e}") or account_name == e:
             return e
     return "other"
 
 
-def get_azure_subscriptions() -> dict[str, str]:
-    azure_cfg = ACCOUNTS.get("azure", {})
-    subs: dict[str, str] = azure_cfg.get("subscriptions", {})
-    return subs
-
-
-def get_aws_accounts() -> dict[str, dict[Any, Any]]:
-    result: dict[str, dict[Any, Any]] = ACCOUNTS.get("aws", {}).get("accounts", {})
-    return result
-
-
-def get_gcp_projects() -> dict[str, dict[Any, Any]]:
-    result: dict[str, dict[Any, Any]] = ACCOUNTS.get("gcp", {}).get("projects", {})
-    return result
+def derive_product(account_name: str) -> str:
+    """Derive product name by stripping environment suffix."""
+    return re.sub(r"-(dev|stg|prd|global)$", "", account_name)

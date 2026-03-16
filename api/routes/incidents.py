@@ -96,7 +96,6 @@ async def create_incident(body: IncidentCreate, request: Request) -> dict[str, A
                     inc, structured, changes, health if structured else []
                 )
                 if analysis:
-                    await repo.update_incident(incident_id, ai_analysis=analysis)
                     await repo.add_annotation(
                         incident_id, f"AI Analysis:\n{analysis}", author="ai"
                     )
@@ -111,7 +110,9 @@ async def list_incidents(
     status: str | None = None, scope: str | None = None, limit: int = Query(50, le=200)
 ) -> dict[str, Any]:
     return {
-        "incidents": await repo.list_incidents(status=status, scope=scope, limit=limit)
+        "incidents": await repo.list_incidents(
+            status=status, scope=scope or "all", limit=limit
+        )
     }
 
 
@@ -158,7 +159,6 @@ async def analyze_incident_rca(incident_id: int, request: Request) -> dict[str, 
     from ai.analyzer import analyze_incident as ai_analyze
 
     analysis = await ai_analyze(inc, structured, changes, health)
-    await repo.update_incident(incident_id, ai_analysis=analysis)
     await repo.add_annotation(incident_id, f"AI Analysis:\n{analysis}", author="ai")
     return {"analysis": analysis}
 

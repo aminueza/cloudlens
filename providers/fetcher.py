@@ -7,7 +7,7 @@ import threading
 from datetime import UTC, datetime
 from typing import Any
 
-from config.settings import ACCOUNTS, settings
+from config.settings import settings
 from graph.builder import build_graph, build_structured_graph
 from providers.registry import ProviderRegistry
 
@@ -35,6 +35,14 @@ class BackgroundFetcher:
     def get_structured(self, scope: str) -> dict[str, Any] | None:
         with self._lock:
             return self._structured_cache.get(scope)
+
+    def get_discovered_products(self) -> list[str]:
+        """Derive product names from discovered subscription/account names."""
+        from config.settings import derive_product
+
+        accounts = self._registry.get_all_discovered_accounts()
+        products = sorted({derive_product(name) for name in accounts.values()})
+        return products
 
     def subscribe(self, queue: asyncio.Queue[str]) -> None:
         with self._lock:
@@ -96,7 +104,7 @@ class BackgroundFetcher:
                 sgs,
                 interfaces,
                 peerings,
-            ) = await self._registry.fetch_all(ACCOUNTS)
+            ) = await self._registry.fetch_all()
 
             logger.info(
                 "Fetched: %d networks, %d resources, %d SGs, %d peerings",
