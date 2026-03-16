@@ -393,7 +393,7 @@ async def clear_violations(scope: str) -> None:
 
 
 async def save_health_checks(checks: list[dict]) -> None:
-    """Bulk-insert health check results."""
+    """Bulk-insert health check results. Maps engine field names to DB columns."""
     if not checks:
         return
     db = await get_db()
@@ -405,13 +405,13 @@ async def save_health_checks(checks: list[dict]) -> None:
         """,
         [
             (
-                c.get("scope"),
-                c.get("provider"),
-                c.get("check_name"),
-                c.get("status"),
+                c.get("product", c.get("scope", "")),
+                c.get("provider", ""),
+                c.get("check_type", c.get("check_name", "")),
+                c.get("status", ""),
                 c.get("severity", "info"),
-                c.get("resource_name"),
-                c.get("detail"),
+                c.get("resource_name", ""),
+                c.get("message", c.get("detail", "")),
             )
             for c in checks
         ],
@@ -430,7 +430,14 @@ async def get_health_checks(scope: str, limit: int = 200) -> list[dict]:
         (scope, limit),
     )
     rows = await cursor.fetchall()
-    return _rows_to_list(rows)
+    # Map DB columns back to engine field names for API compatibility
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["check_type"] = d.pop("check_name", "")
+        d["message"] = d.pop("detail", "")
+        result.append(d)
+    return result
 
 
 async def get_health_summary(scope: str) -> dict:
@@ -438,14 +445,14 @@ async def get_health_summary(scope: str) -> dict:
     db = await get_db()
     cursor = await db.execute(
         """
-        SELECT status, severity, COUNT(*) as count
+        SELECT status, COUNT(*) as count
         FROM health_checks WHERE scope = ?
-        GROUP BY status, severity
+        GROUP BY status
         """,
         (scope,),
     )
     rows = await cursor.fetchall()
-    summary: dict[str, int] = {"pass": 0, "fail": 0, "warn": 0}
+    summary: dict[str, int] = {"critical": 0, "warning": 0, "healthy": 0}
     for r in rows:
         row = dict(r)
         status = row["status"]

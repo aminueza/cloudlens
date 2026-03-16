@@ -20,10 +20,12 @@ def run_health_checks(product: str, structured: dict) -> list[dict]:
 
 
 def _check_peering_state(product: str, data: dict) -> list[dict]:
-    """Flag peerings that are not in Connected state."""
+    """Flag peerings that are not in connected/active state."""
     results = []
+    connected_states = {"connected", "active"}
     for p in data.get("peerings", []):
-        if p.get("state") != "Connected":
+        state = (p.get("state") or "unknown").lower()
+        if state not in connected_states:
             results.append(
                 {
                     "product": product,
@@ -32,23 +34,23 @@ def _check_peering_state(product: str, data: dict) -> list[dict]:
                     "resource_type": "peering",
                     "resource_id": p.get("id", ""),
                     "resource_name": p.get("name", "unknown"),
-                    "message": f"Network peering '{p.get('name')}' is in state '{p.get('state')}' (expected: Connected)",
+                    "message": f"Network peering '{p.get('name')}' state: {state} (expected: connected)",
                     "details": {
-                        "state": p.get("state"),
-                        "from": p.get("fromId"),
-                        "to": p.get("toId"),
+                        "state": state,
+                        "from": p.get("source_network", p.get("fromId", "")),
+                        "to": p.get("target_network", p.get("toId", "")),
                     },
                 }
             )
     if not any(r["check_type"] == "peering_disconnected" for r in results):
-        connected = len(data.get("peerings", []))
-        if connected > 0:
+        total = len(data.get("peerings", []))
+        if total > 0:
             results.append(
                 {
                     "product": product,
                     "check_type": "peering_disconnected",
                     "status": "healthy",
-                    "message": f"All {connected} peerings are connected",
+                    "message": f"All {total} peerings are connected",
                 }
             )
     return results
