@@ -1,4 +1,4 @@
-"""Background fetcher — polls all providers, caches topology, runs post-fetch tasks."""
+"""Background fetcher — polls all providers, builds graphs, caches topology."""
 
 import asyncio
 import json
@@ -7,21 +7,17 @@ import threading
 from datetime import UTC, datetime
 from typing import Any
 
-from config.settings import settings
-from providers.registry import AuthenticationError, ProviderRegistry
+from config.settings import ACCOUNTS, settings
+from graph.builder import build_graph, build_structured_graph
+from providers.registry import ProviderRegistry
 
 logger = logging.getLogger(__name__)
 
 
 class BackgroundFetcher:
-    """Periodically fetches topology from all providers via the registry.
+    """Periodically fetches from all providers, builds graphs, caches results, notifies SSE."""
 
-    Caches flat and structured topology per scope. After each fetch cycle,
-    saves snapshots, runs diff/health/compliance. Manages SSE subscribers
-    for live update notifications.
-    """
-
-    def __init__(self, registry: ProviderRegistry, poll_interval: int = 60) -> None:
+    def __init__(self, registry: ProviderRegistry, poll_interval: int = 300) -> None:
         self._registry = registry
         self._poll_interval = poll_interval
         self._topology_cache: dict[str, dict[str, Any]] = {}
@@ -30,198 +26,159 @@ class BackgroundFetcher:
         self._lock = threading.Lock()
         self._task: asyncio.Task[None] | None = None
         self._running = False
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._auth_errors: dict[str, str] = {}
-
-    # --- Cache access ---
+        self._generation = 0
 
     def get_topology(self, scope: str) -> dict[str, Any] | None:
-        """Return cached flat topology for the given scope."""
         with self._lock:
             return self._topology_cache.get(scope)
 
     def get_structured(self, scope: str) -> dict[str, Any] | None:
-        """Return cached structured topology for the given scope."""
         with self._lock:
             return self._structured_cache.get(scope)
 
-    # --- SSE subscriber management ---
-
     def subscribe(self, queue: asyncio.Queue[str]) -> None:
-        """Register an SSE subscriber."""
         with self._lock:
             self._subscribers.append(queue)
 
     def unsubscribe(self, queue: asyncio.Queue[str]) -> None:
-        """Remove an SSE subscriber."""
         with self._lock:
             self._subscribers = [q for q in self._subscribers if q is not queue]
 
-    def _notify(self, event: dict[str, Any]) -> None:
-        """Send an event to all SSE subscribers."""
-        payload = json.dumps(event)
+    def _notify(self, msg: str) -> None:
         with self._lock:
             dead: list[asyncio.Queue[str]] = []
             for q in self._subscribers:
                 try:
-                    q.put_nowait(payload)
+                    q.put_nowait(msg)
                 except asyncio.QueueFull:
                     dead.append(q)
             for q in dead:
                 self._subscribers.remove(q)
 
-    # --- Lifecycle ---
-
     def start(self) -> None:
-        """Start the background polling loop."""
         self._running = True
         try:
             loop = asyncio.get_running_loop()
-            self._loop = loop
             self._task = loop.create_task(self._poll_loop())
+            logger.info("Background fetcher started (interval=%ds)", self._poll_interval)
         except RuntimeError:
             logger.warning("No running event loop; fetcher will not auto-poll")
 
     def stop(self) -> None:
-        """Stop the background polling loop."""
         self._running = False
         if self._task is not None:
             self._task.cancel()
             self._task = None
-
-    # --- Polling ---
+            logger.info("Background fetcher stopped")
 
     async def _poll_loop(self) -> None:
-        """Main polling loop."""
-        # Initial fetch immediately
-        await self._fetch_all()
-
+        await self._fetch_cycle()
         while self._running:
             try:
                 await asyncio.sleep(self._poll_interval)
                 if not self._running:
                     break
-                await self._fetch_all()
+                await self._fetch_cycle()
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("Error in fetch loop")
+                logger.exception("Fetch cycle failed")
 
-    async def _fetch_all(self) -> None:
-        """Fetch topology from all providers for all scopes."""
-        scopes = self._registry.get_scopes()
-
-        for scope in scopes:
-            await self._fetch_scope(scope)
-
-        # Also fetch the "all" aggregate
-        if "all" not in scopes:
-            await self._fetch_scope("all")
-
-    async def _fetch_scope(self, scope: str) -> None:
-        """Fetch and cache topology for a single scope."""
+    async def _fetch_cycle(self) -> None:
+        """Fetch from all providers, build graphs, cache, notify."""
         try:
-            topology = await self._registry.fetch_topology(scope)
-            structured = await self._registry.fetch_structured(scope)
+            networks, networks_sub, resources, sgs, interfaces, peerings = (
+                await self._registry.fetch_all(ACCOUNTS)
+            )
+
+            logger.info(
+                "Fetched: %d networks, %d resources, %d SGs, %d peerings",
+                len(networks),
+                len(resources),
+                len(sgs),
+                len(peerings),
+            )
+
+            # Build flat graph for "all" scope
+            flat = build_graph("all", networks, resources, sgs, interfaces, peerings)
+            structured = build_structured_graph(
+                "all", networks, networks_sub, resources, sgs, interfaces, peerings
+            )
 
             with self._lock:
-                old_topology = self._topology_cache.get(scope)
-                self._topology_cache[scope] = topology
-                self._structured_cache[scope] = structured
+                self._topology_cache["all"] = flat
+                self._structured_cache["all"] = structured
 
-            # Clear auth errors for providers that succeeded
-            for name in self._registry.providers:
-                if name in self._auth_errors:
-                    del self._auth_errors[name]
+            self._generation += 1
 
-            # Post-fetch tasks
-            await self._post_fetch(scope, topology, structured, old_topology)
+            # Post-fetch: save snapshot, health checks, etc.
+            await self._post_fetch("all", structured)
 
-            # Notify SSE subscribers
-            self._notify(
-                {
-                    "type": "update",
-                    "scope": scope,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                    "node_count": len(topology.get("nodes", [])),
-                }
-            )
+            self._notify(json.dumps({
+                "type": "update",
+                "scope": "all",
+                "generation": self._generation,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }))
 
-        except AuthenticationError as exc:
-            provider = getattr(exc, "provider", "unknown")
-            error_msg = str(exc)
-            self._auth_errors[provider] = error_msg
-            logger.warning(
-                "Auth error for provider %s in scope %s: %s", provider, scope, exc
-            )
-
-            self._notify(
-                {
-                    "type": "auth_error",
-                    "scope": scope,
-                    "provider": provider,
-                    "error": error_msg,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                }
+            logger.info(
+                "Fetch cycle %d complete: %d networks, %d peerings",
+                self._generation,
+                structured.get("stats", {}).get("networks", 0),
+                structured.get("stats", {}).get("peerings", 0),
             )
 
         except Exception:
-            logger.exception("Failed to fetch scope %s", scope)
+            logger.exception("Fetch cycle failed")
+            self._notify(json.dumps({
+                "type": "auth_error",
+                "errors": self._registry.get_auth_errors(),
+                "timestamp": datetime.now(UTC).isoformat(),
+            }))
 
-    async def _post_fetch(
-        self,
-        scope: str,
-        topology: dict[str, Any],
-        structured: dict[str, Any],
-        old_topology: dict[str, Any] | None,
-    ) -> None:
-        """Run post-fetch tasks: snapshot, diff, health checks, compliance."""
+    async def _post_fetch(self, scope: str, structured: dict[str, Any]) -> None:
+        """Save snapshot + run health checks + save results."""
+        # Save snapshot
         try:
-
             from db import repository as repo
 
             await repo.save_snapshot(
-                scope=scope, generation=0, topology=topology, structured=topology
+                scope=scope,
+                generation=self._generation,
+                topology=structured,
+                structured=structured,
             )
         except Exception:
             logger.debug("Could not save snapshot for %s", scope, exc_info=True)
 
-        # Diff detection
-        if old_topology is not None:
-            try:
-                from engine.diff import compute_diff
-
-                changes = compute_diff(old_topology, topology)
-                if changes:
-
-                    from db import repository as repo
-
-                    await repo.save_changes(changes)
-                    logger.info("Detected %d changes in scope %s", len(changes), scope)
-            except Exception:
-                logger.debug("Could not compute diff for %s", scope, exc_info=True)
-
         # Health checks
         try:
+            from db import repository as repo
             from engine.health import run_health_checks
 
-            run_health_checks(structured, scope)
+            checks = run_health_checks(scope, structured)
+            if checks:
+                await repo.save_health_checks(checks)
         except Exception:
-            logger.debug("Could not run health checks for %s", scope, exc_info=True)
+            logger.debug("Health checks failed for %s", scope, exc_info=True)
 
-        # Compliance evaluation
+        # Compliance
         try:
-            from engine.compliance import evaluate_compliance
+            from db import repository as repo
+            from engine.compliance import evaluate_rules
 
-            evaluate_compliance(structured, scope)
+            rules = await repo.list_compliance_rules(scope)
+            violations = evaluate_rules(scope, structured, rules)
+            await repo.clear_violations(scope)
+            if violations:
+                await repo.save_violations(violations)
         except Exception:
-            logger.debug("Could not evaluate compliance for %s", scope, exc_info=True)
+            logger.debug("Compliance check failed for %s", scope, exc_info=True)
 
-        # Snapshot retention cleanup
+        # Cleanup
         try:
-
             from db import repository as repo
 
             await repo.cleanup_old_snapshots(scope, keep=settings.SNAPSHOT_RETENTION)
         except Exception:
-            logger.debug("Could not clean up snapshots for %s", scope, exc_info=True)
+            logger.debug("Snapshot cleanup failed for %s", scope, exc_info=True)
