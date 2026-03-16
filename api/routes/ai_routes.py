@@ -25,7 +25,11 @@ async def ai_query(body: AIQueryRequest, request: Request) -> dict[str, Any]:
     health = run_health_checks(scope, structured)
 
     raw_history = await repo.get_ai_history(scope, limit=20)
-    history = [{"role": m["role"], "content": m["content"]} for m in raw_history if "role" in m and "content" in m]
+    history = [
+        {"role": m["role"], "content": m["content"]}
+        for m in raw_history
+        if "role" in m and "content" in m
+    ]
 
     await repo.save_ai_message(scope, "user", body.question)
 

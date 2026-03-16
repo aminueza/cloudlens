@@ -1,5 +1,6 @@
 """Full CRUD repository for CloudLens database operations."""
 
+from collections.abc import Iterable
 from typing import Any
 
 import aiosqlite
@@ -14,7 +15,7 @@ def _row_to_dict(row: aiosqlite.Row | None) -> dict | None:
     return dict(row)
 
 
-def _rows_to_list(rows: list[aiosqlite.Row]) -> list[dict]:
+def _rows_to_list(rows: Iterable[aiosqlite.Row]) -> list[dict[str, Any]]:
     """Convert a list of sqlite Rows to list of dicts."""
     return [dict(r) for r in rows]
 

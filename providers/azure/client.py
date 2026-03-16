@@ -263,7 +263,8 @@ class AzureProvider(ProviderInterface):
                 else ""
             )
             dst = f"azure_{remote_sub}_{remote_vnet}"
-            pair = tuple(sorted([src, dst]))
+            sorted_pair = sorted([src, dst])
+            pair = (sorted_pair[0], sorted_pair[1])
             if pair in seen:
                 continue
             seen.add(pair)

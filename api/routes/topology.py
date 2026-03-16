@@ -30,7 +30,7 @@ def _check_auth(request: Request) -> None:
 async def get_topology(scope: str, request: Request) -> dict[str, Any]:
     _check_auth(request)
     fetcher = request.app.state.fetcher
-    data = fetcher.get_topology(scope)
+    data: dict[str, Any] = fetcher.get_topology(scope)
     if data is None:
         data = {"nodes": [], "edges": []}
     return data
@@ -41,7 +41,7 @@ async def get_topology(scope: str, request: Request) -> dict[str, Any]:
 async def get_structured_topology(scope: str, request: Request) -> dict[str, Any]:
     _check_auth(request)
     fetcher = request.app.state.fetcher
-    data = fetcher.get_structured(scope)
+    data: dict[str, Any] = fetcher.get_structured(scope)
     if data is None:
         data = {
             "networks": [],

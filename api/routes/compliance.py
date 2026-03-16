@@ -1,5 +1,6 @@
 """Compliance rules, violations, and AI recommendations."""
 
+import json as json_mod
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -29,13 +30,16 @@ async def list_rules() -> dict[str, Any]:
 
 @router.post("/api/compliance/rules")
 async def create_rule(body: RuleCreate) -> dict[str, Any]:
-    rule_id = await repo.upsert_compliance_rule(
+    rule_id = f"{body.rule_type}_{body.name}".replace(" ", "_").lower()
+    params = json_mod.dumps({"rule_type": body.rule_type, **body.rule_config})
+    await repo.upsert_compliance_rule(
+        rule_id=rule_id,
+        scope="all",
         name=body.name,
         description=body.description,
         severity=body.severity,
-        rule_type=body.rule_type,
-        rule_config=body.rule_config,
         enabled=body.enabled,
+        params=params,
     )
     return {"id": rule_id, "status": "created"}
 

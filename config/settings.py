@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic_settings import BaseSettings
@@ -27,11 +28,12 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
-def _load_accounts(path: str | None = None) -> dict:
+def _load_accounts(path: str | None = None) -> dict[Any, Any]:
     p = Path(path) if path else _BASE_DIR / "accounts.yaml"
     with open(p) as f:
-        data: dict = yaml.safe_load(f)
-    return data.get("providers", {})
+        data: dict[Any, Any] = yaml.safe_load(f)
+    result: dict[Any, Any] = data.get("providers", {})
+    return result
 
 
 ACCOUNTS: dict = _load_accounts()
@@ -71,9 +73,11 @@ def get_azure_subscriptions() -> dict[str, str]:
     return subs
 
 
-def get_aws_accounts() -> dict[str, dict]:
-    return ACCOUNTS.get("aws", {}).get("accounts", {})
+def get_aws_accounts() -> dict[str, dict[Any, Any]]:
+    result: dict[str, dict[Any, Any]] = ACCOUNTS.get("aws", {}).get("accounts", {})
+    return result
 
 
-def get_gcp_projects() -> dict[str, dict]:
-    return ACCOUNTS.get("gcp", {}).get("projects", {})
+def get_gcp_projects() -> dict[str, dict[Any, Any]]:
+    result: dict[str, dict[Any, Any]] = ACCOUNTS.get("gcp", {}).get("projects", {})
+    return result

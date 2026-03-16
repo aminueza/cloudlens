@@ -159,9 +159,8 @@ class BackgroundFetcher:
 
             await repo.save_snapshot(
                 scope=scope,
-                generation=self._generation,
-                topology=structured,
-                structured=structured,
+                graph_json=json.dumps(structured),
+                structured_json=json.dumps(structured),
             )
         except Exception:
             logger.debug("Could not save snapshot for %s", scope, exc_info=True)

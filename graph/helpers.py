@@ -2,6 +2,7 @@
 
 import re
 from collections import defaultdict
+from typing import Any
 
 
 def safe_id(s: str) -> str:
@@ -128,7 +129,7 @@ def esc(s: str) -> str:
     )
 
 
-def _attr(obj: object, field: str, default: object = None) -> object:
+def _attr(obj: object, field: str, default: Any = None) -> Any:
     """Get attribute from an object or dict, with fallback."""
     if isinstance(obj, dict):
         return obj.get(field, default)

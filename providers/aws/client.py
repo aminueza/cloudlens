@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from typing import Any
 
 from providers.base import NetworkPeering, NetworkResource, ProviderInterface
 
@@ -46,7 +47,8 @@ class AWSProvider(ProviderInterface):
             fn = getattr(client, method)
             result = await asyncio.to_thread(fn, **kwargs)
             self._auth_error = None
-            return result.get(key, [])
+            items: list[dict[str, Any]] = result.get(key, [])
+            return items
         except Exception as e:
             msg = str(e).lower()
             if (
