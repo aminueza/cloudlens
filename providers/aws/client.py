@@ -26,6 +26,8 @@ class AWSProvider(ProviderInterface):
         self._auth_error: str | None = None
         self._regions: list[str] = []
         self._account_id: str = ""
+        self._ready = False
+        self._ready_lock = asyncio.Lock()
 
     def _get_session(self):
         try:
@@ -107,8 +109,16 @@ class AWSProvider(ProviderInterface):
 
         return get_env(acct_name)
 
+    async def _ensure_ready(self) -> None:
+        """Init + discover once; all fetch methods await this."""
+        async with self._ready_lock:
+            if self._ready:
+                return
+            await asyncio.to_thread(self._discover)
+            self._ready = True
+
     async def fetch_networks(self) -> list[NetworkResource]:
-        await asyncio.to_thread(self._discover)
+        await self._ensure_ready()
         results: list[NetworkResource] = []
 
         async def _fetch_region(region: str) -> None:
@@ -141,6 +151,7 @@ class AWSProvider(ProviderInterface):
         return results
 
     async def fetch_networks_with_subnets(self) -> list[NetworkResource]:
+        await self._ensure_ready()
         results: list[NetworkResource] = []
 
         async def _fetch_region(region: str) -> None:
@@ -169,6 +180,7 @@ class AWSProvider(ProviderInterface):
         return results
 
     async def fetch_resources(self) -> list[NetworkResource]:
+        await self._ensure_ready()
         results: list[NetworkResource] = []
 
         async def _fetch_region(region: str) -> None:
@@ -247,6 +259,7 @@ class AWSProvider(ProviderInterface):
         return results
 
     async def fetch_security_groups(self) -> list[NetworkResource]:
+        await self._ensure_ready()
         results: list[NetworkResource] = []
 
         async def _fetch_region(region: str) -> None:
@@ -279,6 +292,7 @@ class AWSProvider(ProviderInterface):
         return results
 
     async def fetch_network_interfaces(self) -> list[NetworkResource]:
+        await self._ensure_ready()
         results: list[NetworkResource] = []
 
         async def _fetch_region(region: str) -> None:
@@ -312,6 +326,7 @@ class AWSProvider(ProviderInterface):
         return results
 
     async def fetch_peerings(self) -> list[NetworkPeering]:
+        await self._ensure_ready()
         results: list[NetworkPeering] = []
         seen: set[str] = set()
 

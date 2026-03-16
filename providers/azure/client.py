@@ -61,7 +61,8 @@ class AzureProvider(ProviderInterface):
             sub_client = SubscriptionClient(self._credential)
             sub_ids: list[str] = []
             for sub in sub_client.subscriptions.list():
-                if sub.state and sub.state.value == "Enabled":
+                state = str(sub.state) if sub.state else ""
+                if "Enabled" in state or "enabled" in state:
                     sub_id = sub.subscription_id or ""
                     display_name = sub.display_name or sub_id
                     sub_ids.append(sub_id)
@@ -232,7 +233,7 @@ class AzureProvider(ProviderInterface):
         return result
 
     async def fetch_network_interfaces(self) -> list[NetworkResource]:
-        sub_ids = self._get_sub_ids()
+        sub_ids = await self._ensure_ready()
         if not sub_ids:
             return []
         raw = await self._run_query("nics", QUERIES["nics"], sub_ids)
@@ -271,7 +272,7 @@ class AzureProvider(ProviderInterface):
         return result
 
     async def fetch_peerings(self) -> list[NetworkPeering]:
-        sub_ids = self._get_sub_ids()
+        sub_ids = await self._ensure_ready()
         if not sub_ids:
             return []
         raw = await self._run_query("vnets", QUERIES["vnets"], sub_ids)
