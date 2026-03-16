@@ -58,7 +58,9 @@ class ProviderRegistry:
     def has_auth_error(self) -> bool:
         return any(p.get_auth_error() for p in self._providers.values())
 
-    async def fetch_all(self, accounts_config: dict) -> tuple[
+    async def fetch_all(
+        self, accounts_config: dict
+    ) -> tuple[
         list[NetworkResource],
         list[NetworkResource],
         list[NetworkResource],
