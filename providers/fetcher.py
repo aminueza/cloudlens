@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import threading
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from config.settings import settings
@@ -142,7 +142,7 @@ class BackgroundFetcher:
                 {
                     "type": "update",
                     "scope": scope,
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "node_count": len(topology.get("nodes", [])),
                 }
             )
@@ -161,7 +161,7 @@ class BackgroundFetcher:
                     "scope": scope,
                     "provider": provider,
                     "error": error_msg,
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             )
 
