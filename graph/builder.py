@@ -69,7 +69,7 @@ def build_graph(
 
     # --- Resource nodes ---
     for r in resources:
-        rtype = _attr(r, "type") or "unknown"
+        rtype = _attr(r, "resource_type") or _attr(r, "type") or "unknown"
         rname = _attr(r, "name") or ""
         rid = safe_id(f"res_{rname}_{_attr(r, 'id') or rname}")
         if rid in node_ids:
@@ -229,7 +229,7 @@ def build_structured_graph(
     # Place resources under networks
     unlinked_resources: list[dict] = []
     for r in resources:
-        rtype = _attr(r, "type") or "unknown"
+        rtype = _attr(r, "resource_type") or _attr(r, "type") or "unknown"
         rname = _attr(r, "name") or ""
         net_name, subnet, private_ip = find_network_for_resource(
             r, acct_nets, iface_map, networks
